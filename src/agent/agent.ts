@@ -1,0 +1,194 @@
+/**
+ * The agent turn handler.
+ *
+ * Every post-onboarding interaction — incoming WhatsApp message, scheduled
+ * meal nudge, or nightly summary trigger — funnels through `handleTurn`.
+ *
+ * Flow:
+ *   1. Persist the incoming user message (if any)
+ *   2. If there's a PDF attached, parse it FIRST (deterministic, not via LLM
+ *      tool call) so the inventory is updated before the LLM sees the turn
+ *   3. Load context fresh from the DB
+ *   4. Build system prompt + messages array
+ *   5. Call generateText() with tools — Vercel AI SDK handles the tool loop
+ *   6. Persist the assistant reply
+ *   7. Send via Twilio
+ */
+
+import { generateText, type CoreMessage } from 'ai';
+import { db } from '../config/database.js';
+import { messages } from '../db/schema.js';
+import { model } from '../llm/client.js';
+import { sendText } from '../services/whatsapp.js';
+import { parseAndSaveInvoice } from '../services/invoice.js';
+import { loadContext } from './context.js';
+import { buildSystemPrompt, type TurnTrigger } from './system-prompt.js';
+import { buildTools } from './tools.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('agent');
+
+const MAX_TOOL_STEPS = 5;
+
+export type AgentTrigger =
+  | { type: 'message'; text: string; mediaItems: Array<{ url: string; contentType: string }> }
+  | { type: 'nudge'; mealType: 'breakfast' | 'lunch' | 'snack' | 'dinner' }
+  | { type: 'nightly' };
+
+export async function handleTurn(userId: string, trigger: AgentTrigger): Promise<void> {
+  try {
+    // ── 1. Persist the raw user message (for message-type triggers) ────────
+    if (trigger.type === 'message') {
+      const text = trigger.text.trim();
+      const pdfNote =
+        trigger.mediaItems.find((m) => m.contentType === 'application/pdf') !== undefined
+          ? ' [sent a PDF invoice]'
+          : '';
+      const content = text.length > 0 || pdfNote ? `${text}${pdfNote}` : '(empty message)';
+      await db.insert(messages).values({ userId, role: 'user', content });
+    }
+
+    // ── 2. If a PDF was attached, parse it BEFORE calling the LLM ──────────
+    let pdfSummary: string | null = null;
+    if (trigger.type === 'message') {
+      const pdf = trigger.mediaItems.find((m) => m.contentType === 'application/pdf');
+      if (pdf) {
+        try {
+          const result = await parseAndSaveInvoice({ userId, mediaUrl: pdf.url });
+          if (result.itemCount === 0) {
+            pdfSummary =
+              '(PDF processed but no recognizable grocery items were found. Tell the user that gently.)';
+          } else {
+            const preview = result.items
+              .slice(0, 15)
+              .map((it) => it.normalizedName)
+              .join(', ');
+            const more = result.items.length > 15 ? `, +${result.items.length - 15} more` : '';
+            pdfSummary = `(PDF processed successfully. ${result.itemCount} items added to inventory: ${preview}${more}. Thank the user and mention a few of them.)`;
+          }
+        } catch (err) {
+          log.error('PDF parse failed inside agent turn', err);
+          pdfSummary =
+            "(PDF processing failed. Apologize and ask the user to try sending it again, or type out a few items manually.)";
+        }
+      }
+    }
+
+    // ── 3. Load context fresh (inventory will already reflect the PDF) ────
+    const ctx = await loadContext(userId);
+
+    // ── 4. Build system prompt + messages ──────────────────────────────────
+    const llmTrigger: TurnTrigger =
+      trigger.type === 'message'
+        ? { type: 'message', text: trigger.text, hasPdf: pdfSummary !== null }
+        : trigger;
+
+    const system = buildSystemPrompt(ctx, llmTrigger);
+
+    const historyMessages: CoreMessage[] = ctx.history.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    // For non-message triggers (cron-fired nudges / nightly) we need to
+    // synthesize a user-role turn so the model has something to respond to.
+    // The AI SDK requires at least one user message when tools are enabled.
+    let finalMessages: CoreMessage[] = historyMessages;
+
+    if (trigger.type === 'nudge') {
+      finalMessages = [
+        ...historyMessages,
+        {
+          role: 'user',
+          content: `(system event: scheduled ${trigger.mealType} reminder — generate the nudge message)`,
+        },
+      ];
+    } else if (trigger.type === 'nightly') {
+      finalMessages = [
+        ...historyMessages,
+        {
+          role: 'user',
+          content:
+            '(system event: end-of-day check-in — generate the nightly summary and ask about finished items)',
+        },
+      ];
+    } else if (pdfSummary !== null) {
+      // Append the pdf parse result as an additional system note at the end
+      // of history so the model sees it right before composing a reply.
+      finalMessages = [
+        ...historyMessages,
+        { role: 'system', content: `PDF processing result: ${pdfSummary}` },
+      ];
+    }
+
+    // Safety: if history is empty AND this is a normal message turn with no
+    // prior history, make sure we at least pass the current user message.
+    if (
+      finalMessages.length === 0 &&
+      trigger.type === 'message' &&
+      trigger.text.trim().length > 0
+    ) {
+      finalMessages = [{ role: 'user', content: trigger.text }];
+    }
+
+    // ── 5. Call LLM with tools ─────────────────────────────────────────────
+    const tools = buildTools(userId);
+
+    const result = await generateText({
+      model,
+      system,
+      messages: finalMessages,
+      tools,
+      maxSteps: MAX_TOOL_STEPS,
+      temperature: 0.7,
+    });
+
+    const replyText = (result.text ?? '').trim();
+
+    if (replyText.length === 0) {
+      log.warn(`Empty LLM response for user ${userId}; falling back.`);
+      const fallback = "Hmm, I didn't quite catch that. Could you try rephrasing?";
+      await sendAndPersist(userId, fallback);
+      return;
+    }
+
+    // ── 6 + 7. Persist + send ─────────────────────────────────────────────
+    await sendAndPersist(userId, replyText);
+    log.debug(`Agent turn complete for ${userId}`, {
+      toolCalls: result.toolCalls?.length ?? 0,
+      steps: result.steps?.length ?? 0,
+    });
+  } catch (err) {
+    log.error(`Agent turn failed for user ${userId}`, err);
+    // Best-effort fallback so the user doesn't see silence
+    try {
+      const phone = await phoneForUserId(userId);
+      if (phone) {
+        await sendText(
+          phone,
+          "Something went sideways on my end. Give me a minute and try again 🙏",
+        );
+      }
+    } catch {
+      /* swallow */
+    }
+  }
+}
+
+async function sendAndPersist(userId: string, text: string): Promise<void> {
+  const phone = await phoneForUserId(userId);
+  if (!phone) {
+    log.warn(`Cannot send — user ${userId} has no phone`);
+    return;
+  }
+  await sendText(phone, text);
+  await db.insert(messages).values({ userId, role: 'assistant', content: text });
+}
+
+async function phoneForUserId(userId: string): Promise<string | null> {
+  const user = await db.query.users.findFirst({
+    where: (u, { eq }) => eq(u.id, userId),
+    columns: { phone: true },
+  });
+  return user?.phone ?? null;
+}

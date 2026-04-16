@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "nightly_summary_at" time DEFAULT '22:00:00' NOT NULL;
