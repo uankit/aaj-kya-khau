@@ -11,14 +11,13 @@
  * No LLM involved. This is cheap, predictable, and easy to reason about.
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull, or, ne } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { users, userSchedules, messages, type User } from '../db/schema.js';
+import { users, userSchedules, messages, defaultPantryItems, type User } from '../db/schema.js';
 import { sendText } from '../services/whatsapp.js';
 import { registerMealCron } from '../services/scheduler.js';
 import { registerNightlyCron } from '../services/nightly.js';
 import { addItemsBulk } from '../services/inventory.js';
-import { DEFAULT_PANTRY } from '../data/default-pantry.js';
 import {
   ONBOARDING_PROMPTS,
   validateName,
@@ -197,15 +196,35 @@ async function registerUserCrons(userId: string) {
     timezone: user.timezone,
   });
 
-  // Seed default pantry staples (spices, oil, salt, sugar, tea, etc.)
-  await addItemsBulk(
-    DEFAULT_PANTRY.map((item) => ({
-      userId,
-      normalizedName: item.normalizedName,
-      category: item.category,
-      source: 'manual' as const,
-      confidence: 'high' as const,
-    })),
-  );
-  log.info(`Seeded ${DEFAULT_PANTRY.length} default pantry items for ${userId}`);
+  // Seed default pantry staples from the DB table.
+  // - region filter: universal (NULL) for v1; later we'll respect user.region
+  // - diet filter: exclude items where excludeDiet matches user's diet_type
+  //   (e.g. ghee is excluded for vegans)
+  const pantryRows = await db
+    .select()
+    .from(defaultPantryItems)
+    .where(
+      and(
+        // Region: universal only for now
+        isNull(defaultPantryItems.region),
+        // Diet: include item if excludeDiet is NULL, or doesn't match user's diet
+        or(
+          isNull(defaultPantryItems.excludeDiet),
+          user.dietType ? ne(defaultPantryItems.excludeDiet, user.dietType) : isNull(defaultPantryItems.excludeDiet),
+        ),
+      ),
+    );
+
+  if (pantryRows.length > 0) {
+    await addItemsBulk(
+      pantryRows.map((item) => ({
+        userId,
+        normalizedName: item.normalizedName,
+        category: item.category,
+        source: 'manual' as const,
+        confidence: 'high' as const,
+      })),
+    );
+  }
+  log.info(`Seeded ${pantryRows.length} default pantry items for ${userId} (diet: ${user.dietType ?? 'none'})`);
 }

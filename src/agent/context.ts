@@ -6,7 +6,7 @@
  *   - last ~15 messages (conversational continuity)
  *
  * This is rebuilt fresh every turn — cheap compared to an LLM call, and keeps
- * state 100% in the DB (no in-memory sync bugs).
+ * state 100% in the DB.
  */
 
 import { desc, eq } from 'drizzle-orm';

@@ -269,6 +269,29 @@ export type NutritionFood = typeof nutritionFoods.$inferSelect;
 export type NewNutritionFood = typeof nutritionFoods.$inferInsert;
 
 /* ------------------------------------------------------------------ */
+/* default_pantry_items                                               */
+/*                                                                    */
+/* The curated "assumed-in-every-kitchen" list seeded into each new   */
+/* user's inventory at the end of onboarding. Lives in the DB (not TS)*/
+/* so new items / regional variants can be added without redeploy.    */
+/* ------------------------------------------------------------------ */
+
+export const defaultPantryItems = pgTable('default_pantry_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  normalizedName: varchar('normalized_name', { length: 100 }).notNull(),
+  category: varchar('category', { length: 50 }).notNull(),
+  // NULL = universal. Set to 'north_india', 'south_india', etc. to scope.
+  region: varchar('region', { length: 30 }),
+  // NULL = all diets. Set to a diet_type to EXCLUDE from that diet.
+  // e.g. ghee has excludeDiet = 'vegan' so vegans don't get ghee seeded.
+  excludeDiet: dietTypeEnum('exclude_diet'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type DefaultPantryItem = typeof defaultPantryItems.$inferSelect;
+export type NewDefaultPantryItem = typeof defaultPantryItems.$inferInsert;
+
+/* ------------------------------------------------------------------ */
 /* Exported types                                                     */
 /* ------------------------------------------------------------------ */
 

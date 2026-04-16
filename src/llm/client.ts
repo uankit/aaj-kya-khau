@@ -1,9 +1,5 @@
 /**
  * Provider-agnostic LLM client.
- *
- * Switching providers is a 1-line change in `.env` — no code modifications.
- * Vercel AI SDK exposes a uniform `LanguageModel` interface so the rest of the
- * codebase doesn't care which backend is actually running the model.
  */
 
 import { anthropic } from '@ai-sdk/anthropic';

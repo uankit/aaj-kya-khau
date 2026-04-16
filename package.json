@@ -17,8 +17,8 @@
     "db:migrate:prod": "node dist/db/migrate.js",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx src/db/seed-nutrition.ts",
-    "db:seed:prod": "node dist/db/seed-nutrition.js",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:seed:prod": "node dist/db/seed.js",
     "railway:start": "npm run db:migrate:prod && npm run db:seed:prod && node dist/index.js"
   },
   "dependencies": {
