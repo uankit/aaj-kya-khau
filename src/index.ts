@@ -46,7 +46,10 @@ async function bootstrap() {
   await loadAllSchedules();
   await loadAllNightlyCrons();
 
-  const address = await app.listen({ port: env.PORT, host: '0.0.0.0' });
+  // Bind to '::' (IPv6 unspecified) for dual-stack (both IPv4 and IPv6).
+  // Railway's edge proxy routes via IPv6 internally — binding to '0.0.0.0'
+  // only listens on IPv4 and causes 502s.
+  const address = await app.listen({ port: env.PORT, host: '::' });
   app.log.info(`🍽️  Aaj Kya Khaun listening at ${address}`);
 }
 
