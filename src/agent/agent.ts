@@ -29,6 +29,10 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('agent');
 
 const MAX_TOOL_STEPS = 5;
+// LLM hard ceiling. GPT-4o usually answers in <5s; anything over 30s is hung.
+// Hitting this limit aborts the request at the HTTP client level and we fall
+// back to a friendly error reply rather than letting the user hang forever.
+const LLM_TIMEOUT_MS = 30_000;
 
 export type AgentTrigger =
   | { type: 'message'; text: string; mediaItems: Array<{ url: string; contentType: string }> }
@@ -141,6 +145,7 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
       tools,
       maxSteps: MAX_TOOL_STEPS,
       temperature: 0.7,
+      abortSignal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     });
 
     const replyText = (result.text ?? '').trim();
@@ -160,21 +165,38 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
     });
   } catch (err) {
     log.error(`Agent turn failed for user ${userId}`, err);
-    // Best-effort fallback so the user doesn't see silence
+    // Distinguish timeouts from other errors so the user gets a message
+    // that matches reality. AbortError fires when AbortSignal.timeout()
+    // trips.
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === 'AbortError' || err.name === 'TimeoutError' || /timeout/i.test(err.message));
+    const fallback = isTimeout
+      ? "Taking longer than usual 🐢 Mind trying that again in a minute?"
+      : "Something went sideways on my end. Give me a minute and try again 🙏";
+    // Best-effort fallback so the user doesn't see silence. We use
+    // sendAndPersist so the fallback is also recorded in message history —
+    // keeps user+assistant messages paired so the next turn's context
+    // doesn't show an orphan user message without a reply.
     try {
-      const phone = await phoneForUserId(userId);
-      if (phone) {
-        await sendText(
-          phone,
-          "Something went sideways on my end. Give me a minute and try again 🙏",
-        );
-      }
-    } catch {
-      /* swallow */
+      await sendAndPersist(userId, fallback);
+    } catch (sendErr) {
+      // If Twilio is ALSO down, at least the error is logged. The user
+      // will see silence but there's nothing we can do about it from here.
+      log.error(`Fallback send also failed for user ${userId}`, sendErr);
     }
   }
 }
 
+/**
+ * Send a message AND persist it to history.
+ *
+ * Order matters: send first, persist second. If sending fails, the user
+ * never sees the message, so we don't want it in history pretending they did.
+ * If persistence fails after a successful send, we log but don't throw —
+ * the user already got their reply and retrying would double-send. The
+ * history will have a one-turn gap which is much better than a double text.
+ */
 async function sendAndPersist(userId: string, text: string): Promise<void> {
   const phone = await phoneForUserId(userId);
   if (!phone) {
@@ -182,7 +204,16 @@ async function sendAndPersist(userId: string, text: string): Promise<void> {
     return;
   }
   await sendText(phone, text);
-  await db.insert(messages).values({ userId, role: 'assistant', content: text });
+  try {
+    await db.insert(messages).values({ userId, role: 'assistant', content: text });
+  } catch (persistErr) {
+    log.error(
+      `Message sent to ${phone} but DB persist failed — history will have a gap`,
+      persistErr,
+    );
+    // Deliberately do NOT rethrow: user already got their reply, and
+    // rethrowing would trigger the fallback path which would double-send.
+  }
 }
 
 async function phoneForUserId(userId: string): Promise<string | null> {

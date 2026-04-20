@@ -29,6 +29,20 @@
       "when": 1776356608444,
       "tag": "0003_add-default-pantry",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1776712534535,
+      "tag": "0004_add-webhook-dedup",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776712865028,
+      "tag": "0005_webhook-dedup-index",
+      "breakpoints": true
     }
   ]
 }

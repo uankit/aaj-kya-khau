@@ -49,10 +49,23 @@ export async function loadContext(userId: string): Promise<AgentContext> {
 
   if (!user) throw new Error(`User ${userId} not found`);
 
+  // Per-message cap: a pathologically long single message (user pasting a
+  // wall of text, or an older assistant reply that listed every item)
+  // shouldn't balloon the LLM context. 2000 chars is generous for a
+  // WhatsApp-sized exchange but bounded.
+  const MAX_MESSAGE_CHARS = 2000;
+
   // History comes back newest-first; the agent wants it oldest-first
   // and only user/assistant messages (filter out 'system' entries).
   const chronologicalHistory = history
     .filter((m): m is { role: 'user' | 'assistant'; content: string } => m.role !== 'system')
+    .map((m) => ({
+      role: m.role,
+      content:
+        m.content.length > MAX_MESSAGE_CHARS
+          ? m.content.slice(0, MAX_MESSAGE_CHARS) + '…'
+          : m.content,
+    }))
     .reverse();
 
   return {

@@ -1,10 +1,16 @@
 import twilio from 'twilio';
 import { env } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
+import { withTimeout, retryWithBackoff } from '../utils/timeout.js';
 
 const log = createLogger('whatsapp');
 
 const client = twilio(env.TWILIO_ACCOUNT_SID, env.TWILIO_AUTH_TOKEN);
+
+// Hard ceilings on external calls so nothing can pin a DB connection forever.
+const TWILIO_SEND_TIMEOUT_MS = 15_000;
+const TWILIO_SEND_RETRY_ATTEMPTS = 3;
+const MEDIA_DOWNLOAD_TIMEOUT_MS = 15_000;
 
 export interface IncomingWhatsAppMessage {
   from: string; // E.164 phone number WITHOUT the 'whatsapp:' prefix
@@ -40,25 +46,37 @@ export function parseIncoming(body: Record<string, string | undefined>): Incomin
   };
 }
 
-/** Sends a plain-text WhatsApp message. */
+/**
+ * Sends a plain-text WhatsApp message with:
+ *   - per-attempt timeout (Twilio SDK doesn't take an AbortSignal, so we race)
+ *   - exponential-backoff retry up to 3 attempts on transient failures
+ *
+ * If every attempt fails, we throw — the caller handles the user-facing fallback.
+ */
 export async function sendText(toPhoneE164: string, text: string): Promise<void> {
   const to = toPhoneE164.startsWith('whatsapp:') ? toPhoneE164 : `whatsapp:${toPhoneE164}`;
-  try {
-    const msg = await client.messages.create({
-      from: env.TWILIO_WHATSAPP_FROM,
-      to,
-      body: text,
-    });
-    log.debug(`Sent to ${to}`, { sid: msg.sid, chars: text.length });
-  } catch (err) {
-    log.error(`Failed to send to ${to}`, err);
-    throw err;
-  }
+
+  await retryWithBackoff(
+    async () => {
+      const msg = await withTimeout(
+        client.messages.create({ from: env.TWILIO_WHATSAPP_FROM, to, body: text }),
+        TWILIO_SEND_TIMEOUT_MS,
+        `Twilio send to ${to}`,
+      );
+      log.debug(`Sent to ${to}`, { sid: msg.sid, chars: text.length });
+    },
+    TWILIO_SEND_RETRY_ATTEMPTS,
+    `Twilio send to ${to}`,
+  );
 }
 
 /**
  * Downloads a media file (e.g. PDF) from a Twilio media URL.
  * Twilio media URLs require HTTP Basic auth with your account credentials.
+ *
+ * Bounded by MEDIA_DOWNLOAD_TIMEOUT_MS via AbortSignal — if the CDN stalls
+ * we free the connection and bubble an error up to the agent, which responds
+ * with a friendly "try resending" fallback instead of hanging forever.
  */
 export async function downloadMedia(mediaUrl: string): Promise<Buffer> {
   const authHeader =
@@ -68,6 +86,7 @@ export async function downloadMedia(mediaUrl: string): Promise<Buffer> {
   const response = await fetch(mediaUrl, {
     headers: { Authorization: authHeader },
     redirect: 'follow',
+    signal: AbortSignal.timeout(MEDIA_DOWNLOAD_TIMEOUT_MS),
   });
 
   if (!response.ok) {

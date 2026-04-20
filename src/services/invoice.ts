@@ -110,12 +110,25 @@ export async function parseAndSaveInvoice(args: {
       return { invoiceId, itemCount: 0, items: [] };
     }
 
-    // 4. Ask the LLM to return a structured item list
+    // 4. Ask the LLM to return a structured item list.
+    //    30k characters is roughly ~7.5k tokens — well within gpt-4o's 128k
+    //    context and generous for even long grocery invoices. Anything longer
+    //    gets truncated with a log so we know when items might be missed.
+    const MAX_PDF_CHARS = 30_000;
+    const truncated = rawText.length > MAX_PDF_CHARS;
+    if (truncated) {
+      log.warn(
+        `PDF text is ${rawText.length} chars, truncating to ${MAX_PDF_CHARS} — some items may be missed (invoice ${invoiceId})`,
+      );
+    }
+    const promptText = rawText.slice(0, MAX_PDF_CHARS);
+
     const { object } = await generateObject({
       model,
       schema: parseSchema,
       system: INVOICE_SYSTEM_PROMPT,
-      prompt: `Extract grocery items from this invoice text:\n\n${rawText.slice(0, 15000)}`,
+      prompt: `Extract grocery items from this invoice text:\n\n${promptText}`,
+      abortSignal: AbortSignal.timeout(45_000),
     });
 
     // 5. Upsert into inventory (skip any low-confidence items with an empty name)
@@ -132,23 +145,28 @@ export async function parseAndSaveInvoice(args: {
         confidence: it.confidence,
       }));
 
-    await addItemsBulk(inputs);
+    // Use the actual inserted/updated count, not the input count.
+    // addItemsBulk dedupes by normalized_name within a batch, so if the
+    // LLM returned "milk" twice we'd only get one row. Reporting the
+    // wrong count would mislead the user.
+    const persisted = await addItemsBulk(inputs);
+    const finalCount = persisted.length;
 
     await db
       .update(invoices)
       .set({
         status: 'completed',
-        rawText: rawText.slice(0, 50_000),
+        rawText: rawText.slice(0, MAX_PDF_CHARS),
         parsedItems: object.items,
-        itemCount: inputs.length,
+        itemCount: finalCount,
       })
       .where(eq(invoices.id, invoiceId));
 
-    log.info(`Parsed invoice ${invoiceId} — ${inputs.length} items added`);
+    log.info(`Parsed invoice ${invoiceId} — ${finalCount} items added (${inputs.length} candidates from LLM)`);
 
     return {
       invoiceId,
-      itemCount: inputs.length,
+      itemCount: finalCount,
       items: inputs.map((it) => ({
         rawName: it.rawName ?? '',
         normalizedName: it.normalizedName,

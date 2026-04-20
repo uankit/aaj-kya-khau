@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS "webhook_dedup_created_at_idx" ON "webhook_dedup" USING btree ("created_at");

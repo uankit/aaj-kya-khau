@@ -1,5 +1,8 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { sql } from 'drizzle-orm';
 import { env } from '../config/env.js';
+import { db } from '../config/database.js';
+import { webhookDedup } from '../db/schema.js';
 import { parseIncoming, validateSignature, sendText } from '../services/whatsapp.js';
 import { getOrCreateUserByPhone } from '../services/user.js';
 import { handleOnboardingMessage, sendCurrentPrompt } from '../onboarding/flow.js';
@@ -8,30 +11,41 @@ import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('webhook');
 
-// De-dup: Twilio occasionally redelivers the same MessageSid on network hiccups.
-// Tracking recently-processed SIDs in a Set with a short TTL is enough for v1.
-const recentSids = new Map<string, number>();
-const SID_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-function rememberSid(sid: string) {
-  recentSids.set(sid, Date.now());
-  // Cheap cleanup
-  if (recentSids.size > 1000) {
-    const cutoff = Date.now() - SID_TTL_MS;
-    for (const [k, v] of recentSids) {
-      if (v < cutoff) recentSids.delete(k);
-    }
-  }
+/**
+ * Atomically claim a Twilio MessageSid. Returns true if we've never seen
+ * this SID before (caller should process), false if it's a duplicate.
+ *
+ * Uses INSERT ... ON CONFLICT DO NOTHING so the DB gives us true atomic
+ * check-and-claim. Unlike the previous in-memory Map, this survives
+ * restarts and races (two concurrent webhook workers can both arrive at
+ * the "is this new?" question; exactly one will get the insert).
+ */
+async function claimSid(messageSid: string): Promise<boolean> {
+  const inserted = await db
+    .insert(webhookDedup)
+    .values({ messageSid })
+    .onConflictDoNothing({ target: webhookDedup.messageSid })
+    .returning({ messageSid: webhookDedup.messageSid });
+  return inserted.length > 0;
 }
 
-function wasSeenRecently(sid: string): boolean {
-  const ts = recentSids.get(sid);
-  if (!ts) return false;
-  if (Date.now() - ts > SID_TTL_MS) {
-    recentSids.delete(sid);
-    return false;
+/**
+ * Periodic cleanup of rows older than 24h. We do this opportunistically
+ * from the webhook handler itself (low volume, fire-and-forget).
+ */
+let lastDedupCleanupAt = 0;
+const DEDUP_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+async function cleanupOldDedupRows(): Promise<void> {
+  if (Date.now() - lastDedupCleanupAt < DEDUP_CLEANUP_INTERVAL_MS) return;
+  lastDedupCleanupAt = Date.now();
+  try {
+    await db.execute(
+      sql`DELETE FROM ${webhookDedup} WHERE ${webhookDedup.createdAt} < NOW() - INTERVAL '24 hours'`,
+    );
+  } catch (err) {
+    log.warn('Dedup cleanup failed (non-fatal)', err);
   }
-  return true;
 }
 
 export async function webhookRoutes(app: FastifyInstance) {
@@ -57,24 +71,45 @@ export async function webhookRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: 'missing From or MessageSid' });
       }
 
-      // De-dup: Twilio may redeliver on retries.
-      if (wasSeenRecently(incoming.messageSid)) {
+      // Atomic dedup: if another worker already claimed this SID (or an
+      // earlier retry already processed it), bail with a 200 so Twilio
+      // stops retrying. Must happen BEFORE sending 200 so we can cleanly
+      // short-circuit retries without processing twice.
+      let claimed: boolean;
+      try {
+        claimed = await claimSid(incoming.messageSid);
+      } catch (err) {
+        // If the DB is down we'd rather accept a possible duplicate than
+        // return 5xx and have Twilio retry forever.
+        log.error('Dedup claim failed; proceeding without dedup', err);
+        claimed = true;
+      }
+
+      if (!claimed) {
         log.info(`Ignoring duplicate SID ${incoming.messageSid}`);
         return reply.code(200).send();
       }
-      rememberSid(incoming.messageSid);
 
       // Reply 200 early so Twilio doesn't retry on any downstream error.
       reply.code(200).send();
 
-      // Fire-and-forget the actual processing. We swallow errors to one
-      // user-facing fallback message so Twilio stops retrying.
-      processMessage(incoming).catch((err) => {
-        log.error(`Failed to process message from ${incoming.from}`, err);
-        sendText(
-          incoming.from,
-          "Sorry, something went wrong on my end. Please try again in a minute!",
-        ).catch(() => {});
+      // Opportunistic cleanup (fire-and-forget)
+      cleanupOldDedupRows().catch(() => {});
+
+      // Fire-and-forget the actual processing. If processing throws, the
+      // agent handler itself sends a fallback message and persists it —
+      // the outer catch here is just for *truly* unexpected errors that
+      // escape even that. Log loudly so we know something's very wrong.
+      processMessage(incoming).catch(async (err) => {
+        log.error(`Unhandled error processing message from ${incoming.from}`, err);
+        try {
+          await sendText(
+            incoming.from,
+            'Sorry, something went wrong on my end. Please try again in a minute!',
+          );
+        } catch (sendErr) {
+          log.error(`Even the fallback send failed for ${incoming.from}`, sendErr);
+        }
       });
     },
   );

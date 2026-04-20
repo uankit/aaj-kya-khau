@@ -292,6 +292,33 @@ export type DefaultPantryItem = typeof defaultPantryItems.$inferSelect;
 export type NewDefaultPantryItem = typeof defaultPantryItems.$inferInsert;
 
 /* ------------------------------------------------------------------ */
+/* webhook_dedup                                                      */
+/*                                                                    */
+/* DB-backed deduplication of Twilio webhook deliveries. Twilio       */
+/* retries an unresponded webhook up to 11 times over ~11 hours, so   */
+/* in-memory dedup (lost on every deploy) is not enough. The PK on    */
+/* message_sid combined with INSERT ... ON CONFLICT DO NOTHING gives  */
+/* us atomic "has this been seen before?" checks.                     */
+/*                                                                    */
+/* Rows older than 24h are pruned opportunistically on insert.        */
+/* ------------------------------------------------------------------ */
+
+export const webhookDedup = pgTable(
+  'webhook_dedup',
+  {
+    messageSid: varchar('message_sid', { length: 64 }).primaryKey(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Cleanup queries filter by created_at — this index keeps that fast
+    // even after the table has seen millions of rows.
+    createdAtIdx: index('webhook_dedup_created_at_idx').on(table.createdAt),
+  }),
+);
+
+export type WebhookDedup = typeof webhookDedup.$inferSelect;
+
+/* ------------------------------------------------------------------ */
 /* Exported types                                                     */
 /* ------------------------------------------------------------------ */
 

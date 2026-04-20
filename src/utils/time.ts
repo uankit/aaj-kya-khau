@@ -19,11 +19,24 @@ export function formatTimeOfDay(hour: number, minute: number): string {
   return `${hh}:${mm}:00`;
 }
 
-/** Converts HH:MM or HH:MM:SS to a cron expression firing daily at that time. */
+/**
+ * Converts HH:MM or HH:MM:SS to a 6-field cron expression firing daily at
+ * that time, with random second-level jitter so that users who picked the
+ * same hh:mm don't all fire on the exact same second (spreads load across
+ * LLM / Twilio / Postgres when this eventually scales).
+ *
+ * Example: parseTime("08:30") → "37 30 8 * * *" (second 37 is random).
+ */
 export function cronForTime(time: string): string | null {
   const parsed = parseTimeOfDay(time);
   if (!parsed) return null;
-  return `${parsed.minute} ${parsed.hour} * * *`;
+  // Belt-and-suspenders range check — parseTimeOfDay already enforces this,
+  // but if we ever bypass it, don't produce a garbage cron.
+  if (parsed.hour < 0 || parsed.hour > 23 || parsed.minute < 0 || parsed.minute > 59) {
+    return null;
+  }
+  const second = Math.floor(Math.random() * 60);
+  return `${second} ${parsed.minute} ${parsed.hour} * * *`;
 }
 
 /** Returns today's date in YYYY-MM-DD for a given IANA timezone. */
