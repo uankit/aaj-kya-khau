@@ -83,18 +83,19 @@ export async function webhookRoutes(app: FastifyInstance) {
 async function processMessage(
   incoming: ReturnType<typeof parseIncoming>,
 ): Promise<void> {
-  const user = await getOrCreateUserByPhone(incoming.from);
+  const { user, created } = await getOrCreateUserByPhone(incoming.from);
 
-  // Brand-new user with no message body (e.g. they just joined the sandbox)?
-  // Send the first onboarding prompt.
   if (!user.onboardingComplete) {
-    // If this is the very first contact and they sent nothing useful, send the
-    // current-step prompt to kick things off.
-    if (!incoming.body.trim() && incoming.numMedia === 0) {
+    // Brand-new user: don't treat their first message ("hi"/"hello") as the
+    // answer to "what's your name?". Send the welcome prompt and wait for
+    // their next message to be the actual answer.
+    if (created) {
+      log.info(`New user ${user.phone} — sending welcome prompt`);
       await sendCurrentPrompt(user);
       return;
     }
-    // Otherwise route to onboarding state machine.
+
+    // Existing onboarding-in-progress user: process their answer.
     const finished = await handleOnboardingMessage(user, incoming.body);
     if (finished) {
       log.info(`User ${user.phone} just finished onboarding`);
