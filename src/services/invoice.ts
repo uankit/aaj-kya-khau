@@ -164,15 +164,19 @@ export async function parseAndSaveInvoice(args: {
 
     log.info(`Parsed invoice ${invoiceId} — ${finalCount} items added (${inputs.length} candidates from LLM)`);
 
+    // Return the preview list from persisted rows (not inputs) so the
+    // count and the preview agree — if the LLM returned duplicates, the
+    // persisted list has them deduped and the user's summary message
+    // won't lie to them.
     return {
       invoiceId,
       itemCount: finalCount,
-      items: inputs.map((it) => ({
-        rawName: it.rawName ?? '',
-        normalizedName: it.normalizedName,
-        category: it.category ?? '',
-        quantity: it.quantity ?? null,
-        confidence: it.confidence ?? 'high',
+      items: persisted.map((row) => ({
+        rawName: row.rawName ?? '',
+        normalizedName: row.normalizedName,
+        category: row.category ?? '',
+        quantity: row.quantity ?? null,
+        confidence: row.confidence,
       })),
     };
   } catch (err) {
