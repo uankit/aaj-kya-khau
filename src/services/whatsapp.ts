@@ -56,18 +56,33 @@ export function parseIncoming(body: Record<string, string | undefined>): Incomin
 export async function sendText(toPhoneE164: string, text: string): Promise<void> {
   const to = toPhoneE164.startsWith('whatsapp:') ? toPhoneE164 : `whatsapp:${toPhoneE164}`;
 
-  await retryWithBackoff(
-    async () => {
-      const msg = await withTimeout(
-        client.messages.create({ from: env.TWILIO_WHATSAPP_FROM, to, body: text }),
-        TWILIO_SEND_TIMEOUT_MS,
-        `Twilio send to ${to}`,
-      );
-      log.debug(`Sent to ${to}`, { sid: msg.sid, chars: text.length });
-    },
-    TWILIO_SEND_RETRY_ATTEMPTS,
-    `Twilio send to ${to}`,
-  );
+  // INFO-level logs around the send so we can see *in production* whether
+  // Twilio accepted the message or the call hung/threw. Debug-level logs
+  // are filtered out by LOG_LEVEL=info.
+  log.info(`→ sending to ${to}`, { chars: text.length, from: env.TWILIO_WHATSAPP_FROM });
+  const startedAt = Date.now();
+
+  try {
+    await retryWithBackoff(
+      async () => {
+        const msg = await withTimeout(
+          client.messages.create({ from: env.TWILIO_WHATSAPP_FROM, to, body: text }),
+          TWILIO_SEND_TIMEOUT_MS,
+          `Twilio send to ${to}`,
+        );
+        log.info(`✓ sent to ${to}`, {
+          sid: msg.sid,
+          status: msg.status,
+          elapsedMs: Date.now() - startedAt,
+        });
+      },
+      TWILIO_SEND_RETRY_ATTEMPTS,
+      `Twilio send to ${to}`,
+    );
+  } catch (err) {
+    log.error(`✗ failed to send to ${to} after ${Date.now() - startedAt}ms`, err);
+    throw err;
+  }
 }
 
 /**

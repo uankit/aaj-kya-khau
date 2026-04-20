@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { sql } from 'drizzle-orm';
+import { lt, sql } from 'drizzle-orm';
 import { env } from '../config/env.js';
 import { db } from '../config/database.js';
 import { webhookDedup } from '../db/schema.js';
@@ -40,9 +40,11 @@ async function cleanupOldDedupRows(): Promise<void> {
   if (Date.now() - lastDedupCleanupAt < DEDUP_CLEANUP_INTERVAL_MS) return;
   lastDedupCleanupAt = Date.now();
   try {
-    await db.execute(
-      sql`DELETE FROM ${webhookDedup} WHERE ${webhookDedup.createdAt} < NOW() - INTERVAL '24 hours'`,
-    );
+    // Idiomatic Drizzle delete — type-safe and guaranteed to generate the
+    // right table/column names.
+    await db
+      .delete(webhookDedup)
+      .where(lt(webhookDedup.createdAt, sql`NOW() - INTERVAL '24 hours'`));
   } catch (err) {
     log.warn('Dedup cleanup failed (non-fatal)', err);
   }
