@@ -17,6 +17,7 @@ import { bot, parseIncoming, sendText } from '../services/telegram.js';
 import { getOrCreateUserByTelegramId } from '../services/user.js';
 import { handleOnboardingMessage, sendCurrentPrompt } from '../onboarding/flow.js';
 import { handleTurn } from '../agent/agent.js';
+import { tryHandleCommand } from '../commands/handlers.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('webhook');
@@ -102,6 +103,12 @@ async function processMessage(
   incoming: ReturnType<typeof parseIncoming> & object,
 ): Promise<void> {
   const { user, created } = await getOrCreateUserByTelegramId(incoming.telegramId);
+
+  // Short-circuit specific slash commands (/start, /help, /mute, /feedback).
+  // Everything else falls through — the LLM agent handles /hungry, /kitchen,
+  // /ate, /today, /schedule, /profile via natural language + tool calls.
+  const commandHandled = await tryHandleCommand(incoming.body, { user, created });
+  if (commandHandled) return;
 
   if (!user.onboardingComplete) {
     if (created) {
