@@ -1,5 +1,4 @@
 import Fastify from 'fastify';
-import formbody from '@fastify/formbody';
 import rateLimit from '@fastify/rate-limit';
 import { env } from './config/env.js';
 import { pool } from './config/database.js';
@@ -20,23 +19,18 @@ const app = Fastify({
         }
       : {}),
   },
-  bodyLimit: 1024 * 1024, // 1 MB — more than enough for Twilio form bodies
+  // Telegram sends JSON update bodies; 1 MB is plenty.
+  bodyLimit: 1024 * 1024,
   trustProxy: true,
 });
 
 async function bootstrap() {
-  // Twilio sends application/x-www-form-urlencoded bodies
-  await app.register(formbody);
-
-  // Light rate limiting to prevent accidental message storms
+  // Light rate limiting. Telegram retries aggressively on failures, and
+  // this also protects against accidental message storms from a buggy user.
   await app.register(rateLimit, {
-    max: 60,
+    max: 120,
     timeWindow: '1 minute',
-    // Rate-limit per "From" number so one bad actor can't block another user
-    keyGenerator: (req) => {
-      const body = (req.body ?? {}) as Record<string, string | undefined>;
-      return body.From ?? req.ip;
-    },
+    keyGenerator: (req) => req.ip,
   });
 
   await app.register(healthRoutes);

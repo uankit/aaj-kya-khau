@@ -20,7 +20,7 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { eq } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { invoices, type Invoice } from '../db/schema.js';
-import { downloadMedia } from './whatsapp.js';
+import { downloadMedia } from './telegram.js';
 import { addItemsBulk, type AddItemInput } from './inventory.js';
 import { model } from '../llm/client.js';
 import { createLogger } from '../utils/logger.js';
@@ -85,21 +85,23 @@ export interface ParseInvoiceResult {
  */
 export async function parseAndSaveInvoice(args: {
   userId: string;
-  mediaUrl: string;
+  /** Telegram file_id for the document attachment */
+  fileId: string;
 }): Promise<ParseInvoiceResult> {
-  const { userId, mediaUrl } = args;
+  const { userId, fileId } = args;
 
   // 1. Create the invoice row up front so we have something to link items to
-  //    even if parsing fails partway through.
+  //    even if parsing fails partway through. We store the file_id as the
+  //    media reference; Telegram file_ids are stable per file upload.
   const [invoice] = await db
     .insert(invoices)
-    .values({ userId, mediaUrl, status: 'processing' })
+    .values({ userId, mediaUrl: fileId, status: 'processing' })
     .returning();
   const invoiceId = invoice!.id;
 
   try {
-    // 2. Download PDF bytes from Twilio
-    const buffer = await downloadMedia(mediaUrl);
+    // 2. Download PDF bytes from Telegram's file CDN
+    const buffer = await downloadMedia(fileId);
     log.debug(`Downloaded PDF (${buffer.length} bytes) for user ${userId}`);
 
     // 3. Extract text

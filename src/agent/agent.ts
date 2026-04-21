@@ -1,7 +1,7 @@
 /**
  * The agent turn handler.
  *
- * Every post-onboarding interaction — incoming WhatsApp message, scheduled
+ * Every post-onboarding interaction — incoming Telegram message, scheduled
  * meal nudge, or nightly summary trigger — funnels through `handleTurn`.
  *
  * Flow:
@@ -12,14 +12,14 @@
  *   4. Build system prompt + messages array
  *   5. Call generateText() with tools — Vercel AI SDK handles the tool loop
  *   6. Persist the assistant reply
- *   7. Send via Twilio
+ *   7. Send via Telegram
  */
 
 import { generateText, type CoreMessage } from 'ai';
 import { db } from '../config/database.js';
 import { messages } from '../db/schema.js';
 import { model } from '../llm/client.js';
-import { sendText } from '../services/whatsapp.js';
+import { sendText } from '../services/telegram.js';
 import { parseAndSaveInvoice } from '../services/invoice.js';
 import { loadContext } from './context.js';
 import { buildSystemPrompt, type TurnTrigger } from './system-prompt.js';
@@ -35,7 +35,11 @@ const MAX_TOOL_STEPS = 5;
 const LLM_TIMEOUT_MS = 30_000;
 
 export type AgentTrigger =
-  | { type: 'message'; text: string; mediaItems: Array<{ url: string; contentType: string }> }
+  | {
+      type: 'message';
+      text: string;
+      mediaItems: Array<{ fileId: string; contentType: string; fileName?: string }>;
+    }
   | { type: 'nudge'; mealType: 'breakfast' | 'lunch' | 'snack' | 'dinner' }
   | { type: 'nightly' };
 
@@ -58,7 +62,7 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
       const pdf = trigger.mediaItems.find((m) => m.contentType === 'application/pdf');
       if (pdf) {
         try {
-          const result = await parseAndSaveInvoice({ userId, mediaUrl: pdf.url });
+          const result = await parseAndSaveInvoice({ userId, fileId: pdf.fileId });
           if (result.itemCount === 0) {
             pdfSummary =
               '(PDF processed but no recognizable grocery items were found. Tell the user that gently.)';
@@ -181,7 +185,7 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
     try {
       await sendAndPersist(userId, fallback);
     } catch (sendErr) {
-      // If Twilio is ALSO down, at least the error is logged. The user
+      // If Telegram is ALSO down, at least the error is logged. The user
       // will see silence but there's nothing we can do about it from here.
       log.error(`Fallback send also failed for user ${userId}`, sendErr);
     }
@@ -198,17 +202,17 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
  * history will have a one-turn gap which is much better than a double text.
  */
 async function sendAndPersist(userId: string, text: string): Promise<void> {
-  const phone = await phoneForUserId(userId);
-  if (!phone) {
-    log.warn(`Cannot send — user ${userId} has no phone`);
+  const telegramId = await telegramIdForUserId(userId);
+  if (!telegramId) {
+    log.warn(`Cannot send — user ${userId} has no telegram_id`);
     return;
   }
-  await sendText(phone, text);
+  await sendText(telegramId, text);
   try {
     await db.insert(messages).values({ userId, role: 'assistant', content: text });
   } catch (persistErr) {
     log.error(
-      `Message sent to ${phone} but DB persist failed — history will have a gap`,
+      `Message sent to ${telegramId} but DB persist failed — history will have a gap`,
       persistErr,
     );
     // Deliberately do NOT rethrow: user already got their reply, and
@@ -216,10 +220,10 @@ async function sendAndPersist(userId: string, text: string): Promise<void> {
   }
 }
 
-async function phoneForUserId(userId: string): Promise<string | null> {
+async function telegramIdForUserId(userId: string): Promise<string | null> {
   const user = await db.query.users.findFirst({
     where: (u, { eq }) => eq(u.id, userId),
-    columns: { phone: true },
+    columns: { telegramId: true },
   });
-  return user?.phone ?? null;
+  return user?.telegramId ?? null;
 }

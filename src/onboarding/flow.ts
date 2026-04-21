@@ -14,7 +14,7 @@
 import { eq, and, isNull, or, ne } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { users, userSchedules, messages, defaultPantryItems, type User } from '../db/schema.js';
-import { sendText } from '../services/whatsapp.js';
+import { sendText } from '../services/telegram.js';
 import { registerMealCron } from '../services/scheduler.js';
 import { registerNightlyCron } from '../services/nightly.js';
 import { addItemsBulk } from '../services/inventory.js';
@@ -42,7 +42,7 @@ async function persistMessage(
 
 /** Sends a message and persists it as the assistant message. */
 async function sendAndPersist(user: User, text: string) {
-  await sendText(user.phone, text);
+  await sendText(user.telegramId, text);
   await persistMessage(user.id, 'assistant', text);
 }
 
@@ -132,7 +132,7 @@ export async function handleOnboardingMessage(user: User, text: string): Promise
           updated,
           ONBOARDING_PROMPTS.complete(updated.name ?? undefined),
         );
-        log.info(`Onboarding complete for ${updated.phone}`);
+        log.info(`Onboarding complete for ${updated.telegramId}`);
         return true;
       }
 

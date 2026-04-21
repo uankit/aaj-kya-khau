@@ -120,8 +120,8 @@ async function triggerNudge(userId: string, mealType: MealType): Promise<void> {
     return;
   }
 
-  // Dispatch to the agent — it'll generate a casual nudge and send via Twilio.
-  log.info(`[NUDGE] Firing ${mealType} nudge for ${user.phone}`);
+  // Dispatch to the agent — it'll generate a casual nudge and send via Telegram.
+  log.info(`[NUDGE] Firing ${mealType} nudge for ${user.telegramId}`);
   await handleTurn(userId, { type: 'nudge', mealType: mealType as 'breakfast' | 'lunch' | 'snack' | 'dinner' });
 }
 

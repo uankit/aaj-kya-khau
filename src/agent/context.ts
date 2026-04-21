@@ -52,7 +52,7 @@ export async function loadContext(userId: string): Promise<AgentContext> {
   // Per-message cap: a pathologically long single message (user pasting a
   // wall of text, or an older assistant reply that listed every item)
   // shouldn't balloon the LLM context. 2000 chars is generous for a
-  // WhatsApp-sized exchange but bounded.
+  // chat-sized exchange but bounded.
   const MAX_MESSAGE_CHARS = 2000;
 
   // History comes back newest-first; the agent wants it oldest-first

@@ -7,8 +7,8 @@ const LANDING_HTML = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Aaj Kya Khaun — WhatsApp Food Assistant</title>
-  <meta name="description" content="A WhatsApp food assistant for Indian households. Parses your grocery invoices, tracks your kitchen inventory, and suggests meals based on what you actually have." />
+  <title>Aaj Kya Khaun — Telegram Food Assistant</title>
+  <meta name="description" content="A Telegram food assistant for Indian households. Parses your grocery invoices, tracks your kitchen inventory, and suggests meals based on what you actually have." />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -57,7 +57,7 @@ const LANDING_HTML = `<!DOCTYPE html>
   <div class="container">
     <div class="emoji">🍽️</div>
     <h1>Aaj Kya Khaun</h1>
-    <p class="tagline">Your WhatsApp food assistant</p>
+    <p class="tagline">Your Telegram food assistant</p>
     <p>Drop your grocery invoices. Track your kitchen inventory. Get meal suggestions based on what you actually have — not generic recipes from the internet.</p>
     <ul class="features">
       <li>📄 <strong>Invoice parsing</strong> — PDFs from Blinkit, Zepto, BigBasket auto-build your inventory</li>
@@ -75,7 +75,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 </html>`;
 
 export async function healthRoutes(app: FastifyInstance) {
-  // Public landing page at root — needed for WhatsApp Business verification
+  // Public landing page at root — useful for link-preview on LinkedIn, etc.
   // (Meta's crawler checks the listed business website exists).
   app.get('/', async (_request, reply) => {
     reply.type('text/html').send(LANDING_HTML);

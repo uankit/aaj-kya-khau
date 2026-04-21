@@ -72,7 +72,7 @@ async function triggerNightly(userId: string): Promise<void> {
   const user = await db.query.users.findFirst({ where: eq(users.id, userId) });
   if (!user || !user.onboardingComplete) return;
 
-  log.info(`[NIGHTLY] Firing for ${user.phone}`);
+  log.info(`[NIGHTLY] Firing for ${user.telegramId}`);
   await handleTurn(userId, { type: 'nightly' });
 }
 

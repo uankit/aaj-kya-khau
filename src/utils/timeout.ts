@@ -3,8 +3,8 @@
  *
  * Prefer `AbortSignal.timeout()` when the underlying API accepts an
  * AbortSignal (fetch, Vercel AI SDK, pg query cancellation). Use
- * `withTimeout()` below when the API doesn't take a signal (e.g. Twilio
- * SDK method calls).
+ * `withTimeout()` below when the API doesn't take a signal (e.g. grammy's
+ * bot.api methods).
  */
 
 export class TimeoutError extends Error {

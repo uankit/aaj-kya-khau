@@ -23,7 +23,7 @@ export function formatTimeOfDay(hour: number, minute: number): string {
  * Converts HH:MM or HH:MM:SS to a 6-field cron expression firing daily at
  * that time, with random second-level jitter so that users who picked the
  * same hh:mm don't all fire on the exact same second (spreads load across
- * LLM / Twilio / Postgres when this eventually scales).
+ * LLM / Telegram / Postgres when this eventually scales).
  *
  * Example: parseTime("08:30") → "37 30 8 * * *" (second 37 is random).
  */

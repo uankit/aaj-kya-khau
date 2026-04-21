@@ -59,7 +59,7 @@ export const users = pgTable(
   'users',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    phone: varchar('phone', { length: 20 }).notNull(),
+    telegramId: varchar('telegram_id', { length: 30 }).notNull(),
     name: varchar('name', { length: 100 }),
     dietType: dietTypeEnum('diet_type'),
     timezone: varchar('timezone', { length: 40 }).notNull().default('Asia/Kolkata'),
@@ -85,7 +85,7 @@ export const users = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    phoneUnique: uniqueIndex('users_phone_unique').on(table.phone),
+    telegramIdUnique: uniqueIndex('users_telegram_id_unique').on(table.telegramId),
   }),
 );
 
@@ -294,11 +294,12 @@ export type NewDefaultPantryItem = typeof defaultPantryItems.$inferInsert;
 /* ------------------------------------------------------------------ */
 /* webhook_dedup                                                      */
 /*                                                                    */
-/* DB-backed deduplication of Twilio webhook deliveries. Twilio       */
-/* retries an unresponded webhook up to 11 times over ~11 hours, so   */
-/* in-memory dedup (lost on every deploy) is not enough. The PK on    */
-/* message_sid combined with INSERT ... ON CONFLICT DO NOTHING gives  */
-/* us atomic "has this been seen before?" checks.                     */
+/* DB-backed deduplication of Telegram webhook deliveries. Telegram    */
+/* retries an unresponded webhook aggressively, so in-memory dedup     */
+/* (lost on every deploy) is not enough. The PK on message_sid column  */
+/* (which we reuse to hold the Telegram update_id) combined with       */
+/* INSERT ... ON CONFLICT DO NOTHING gives us atomic                   */
+/* "has this been seen before?" checks.                                */
 /*                                                                    */
 /* Rows older than 24h are pruned opportunistically on insert.        */
 /* ------------------------------------------------------------------ */

@@ -1,10 +1,20 @@
+/**
+ * Telegram webhook.
+ *
+ * grammy's webhookCallback handles update parsing, signature verification
+ * (via secret token header), and routing to our bot handlers. We register
+ * bot handlers here for incoming messages, which then flow through the
+ * same onboarding → agent pipeline as before.
+ */
+
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { lt, sql } from 'drizzle-orm';
+import { webhookCallback } from 'grammy';
 import { env } from '../config/env.js';
 import { db } from '../config/database.js';
 import { webhookDedup } from '../db/schema.js';
-import { parseIncoming, validateSignature, sendText } from '../services/whatsapp.js';
-import { getOrCreateUserByPhone } from '../services/user.js';
+import { bot, parseIncoming, sendText } from '../services/telegram.js';
+import { getOrCreateUserByTelegramId } from '../services/user.js';
 import { handleOnboardingMessage, sendCurrentPrompt } from '../onboarding/flow.js';
 import { handleTurn } from '../agent/agent.js';
 import { createLogger } from '../utils/logger.js';
@@ -12,36 +22,28 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('webhook');
 
 /**
- * Atomically claim a Twilio MessageSid. Returns true if we've never seen
- * this SID before (caller should process), false if it's a duplicate.
+ * Atomically claim a Telegram update_id. Returns true if we've never seen
+ * this update before (caller should process), false if it's a duplicate.
  *
- * Uses INSERT ... ON CONFLICT DO NOTHING so the DB gives us true atomic
- * check-and-claim. Unlike the previous in-memory Map, this survives
- * restarts and races (two concurrent webhook workers can both arrive at
- * the "is this new?" question; exactly one will get the insert).
+ * Uses INSERT ... ON CONFLICT DO NOTHING. Telegram is at-least-once delivery
+ * and retries the webhook if we don't respond with 200 in time.
  */
-async function claimSid(messageSid: string): Promise<boolean> {
+async function claimUpdate(updateId: string): Promise<boolean> {
   const inserted = await db
     .insert(webhookDedup)
-    .values({ messageSid })
+    .values({ messageSid: updateId })
     .onConflictDoNothing({ target: webhookDedup.messageSid })
     .returning({ messageSid: webhookDedup.messageSid });
   return inserted.length > 0;
 }
 
-/**
- * Periodic cleanup of rows older than 24h. We do this opportunistically
- * from the webhook handler itself (low volume, fire-and-forget).
- */
 let lastDedupCleanupAt = 0;
-const DEDUP_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const DEDUP_CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 async function cleanupOldDedupRows(): Promise<void> {
   if (Date.now() - lastDedupCleanupAt < DEDUP_CLEANUP_INTERVAL_MS) return;
   lastDedupCleanupAt = Date.now();
   try {
-    // Idiomatic Drizzle delete — type-safe and guaranteed to generate the
-    // right table/column names.
     await db
       .delete(webhookDedup)
       .where(lt(webhookDedup.createdAt, sql`NOW() - INTERVAL '24 hours'`));
@@ -50,100 +52,90 @@ async function cleanupOldDedupRows(): Promise<void> {
   }
 }
 
-export async function webhookRoutes(app: FastifyInstance) {
-  app.post(
-    '/webhook/whatsapp',
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const body = (request.body ?? {}) as Record<string, string | undefined>;
+/**
+ * Register grammy message handlers. Every incoming update flows through
+ * here → claimUpdate (dedup) → parseIncoming → onboarding or agent.
+ *
+ * We handle errors at this boundary so grammy can still 200-OK the webhook
+ * response to Telegram (preventing retry storms).
+ */
+function registerBotHandlers(): void {
+  // Matches text messages, PDF documents, or photos
+  bot.on(['message:text', 'message:document', 'message:photo'], async (ctx) => {
+    const incoming = parseIncoming(ctx);
+    if (!incoming) return;
 
-      // Signature validation: reconstruct the full URL Twilio signed against.
-      const url =
-        (env.PUBLIC_BASE_URL ?? `${request.protocol}://${request.hostname}`) +
-        request.url;
-      const signature = request.headers['x-twilio-signature'] as string | undefined;
+    // Dedup
+    let claimed: boolean;
+    try {
+      claimed = await claimUpdate(incoming.updateId);
+    } catch (err) {
+      log.error('Dedup claim failed; proceeding without dedup', err);
+      claimed = true;
+    }
+    if (!claimed) {
+      log.info(`Ignoring duplicate update ${incoming.updateId}`);
+      return;
+    }
 
-      const valid = validateSignature({ signature, url, body });
-      if (!valid) {
-        log.warn('Invalid Twilio signature', { url });
-        return reply.code(403).send({ error: 'invalid signature' });
-      }
+    cleanupOldDedupRows().catch(() => {});
 
-      const incoming = parseIncoming(body);
-      if (!incoming.from || !incoming.messageSid) {
-        return reply.code(400).send({ error: 'missing From or MessageSid' });
-      }
-
-      // Atomic dedup: if another worker already claimed this SID (or an
-      // earlier retry already processed it), bail with a 200 so Twilio
-      // stops retrying. Must happen BEFORE sending 200 so we can cleanly
-      // short-circuit retries without processing twice.
-      let claimed: boolean;
+    try {
+      await processMessage(incoming);
+    } catch (err) {
+      log.error(`Unhandled error processing update from ${incoming.telegramId}`, err);
       try {
-        claimed = await claimSid(incoming.messageSid);
-      } catch (err) {
-        // If the DB is down we'd rather accept a possible duplicate than
-        // return 5xx and have Twilio retry forever.
-        log.error('Dedup claim failed; proceeding without dedup', err);
-        claimed = true;
+        await sendText(
+          incoming.telegramId,
+          'Sorry, something went wrong on my end. Please try again in a minute!',
+        );
+      } catch (sendErr) {
+        log.error(`Even the fallback send failed for ${incoming.telegramId}`, sendErr);
       }
+    }
+  });
 
-      if (!claimed) {
-        log.info(`Ignoring duplicate SID ${incoming.messageSid}`);
-        return reply.code(200).send();
-      }
-
-      // Reply 200 early so Twilio doesn't retry on any downstream error.
-      reply.code(200).send();
-
-      // Opportunistic cleanup (fire-and-forget)
-      cleanupOldDedupRows().catch(() => {});
-
-      // Fire-and-forget the actual processing. If processing throws, the
-      // agent handler itself sends a fallback message and persists it —
-      // the outer catch here is just for *truly* unexpected errors that
-      // escape even that. Log loudly so we know something's very wrong.
-      processMessage(incoming).catch(async (err) => {
-        log.error(`Unhandled error processing message from ${incoming.from}`, err);
-        try {
-          await sendText(
-            incoming.from,
-            'Sorry, something went wrong on my end. Please try again in a minute!',
-          );
-        } catch (sendErr) {
-          log.error(`Even the fallback send failed for ${incoming.from}`, sendErr);
-        }
-      });
-    },
-  );
+  // Anything else (stickers, locations, voice notes we don't yet parse) → ignore
 }
 
 async function processMessage(
-  incoming: ReturnType<typeof parseIncoming>,
+  incoming: ReturnType<typeof parseIncoming> & object,
 ): Promise<void> {
-  const { user, created } = await getOrCreateUserByPhone(incoming.from);
+  const { user, created } = await getOrCreateUserByTelegramId(incoming.telegramId);
 
   if (!user.onboardingComplete) {
-    // Brand-new user: don't treat their first message ("hi"/"hello") as the
-    // answer to "what's your name?". Send the welcome prompt and wait for
-    // their next message to be the actual answer.
     if (created) {
-      log.info(`New user ${user.phone} — sending welcome prompt`);
+      log.info(`New user ${user.telegramId} — sending welcome prompt`);
       await sendCurrentPrompt(user);
       return;
     }
 
-    // Existing onboarding-in-progress user: process their answer.
     const finished = await handleOnboardingMessage(user, incoming.body);
     if (finished) {
-      log.info(`User ${user.phone} just finished onboarding`);
+      log.info(`User ${user.telegramId} just finished onboarding`);
     }
     return;
   }
 
-  // Post-onboarding: dispatch to the LLM agent.
   await handleTurn(user.id, {
     type: 'message',
     text: incoming.body,
     mediaItems: incoming.mediaItems,
+  });
+}
+
+export async function webhookRoutes(app: FastifyInstance) {
+  // Register the grammy handlers once at boot
+  registerBotHandlers();
+
+  // grammy's webhookCallback returns a function that takes (req, res).
+  // We bridge it to Fastify by calling it from the Fastify handler.
+  // The 'fastify' framework adapter handles all the req.body parsing.
+  const handleGrammy = webhookCallback(bot, 'fastify', {
+    secretToken: env.TELEGRAM_WEBHOOK_SECRET,
+  });
+
+  app.post('/webhook/telegram', async (request: FastifyRequest, reply: FastifyReply) => {
+    await handleGrammy(request, reply);
   });
 }

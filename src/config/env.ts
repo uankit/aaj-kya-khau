@@ -15,14 +15,9 @@ const envSchema = z.object({
   // Database
   DATABASE_URL: z.string().url(),
 
-  // Twilio
-  TWILIO_ACCOUNT_SID: z.string().min(1),
-  TWILIO_AUTH_TOKEN: z.string().min(1),
-  TWILIO_WHATSAPP_FROM: z.string().min(1),
-  TWILIO_WEBHOOK_VALIDATE: z
-    .string()
-    .default('true')
-    .transform((v) => v === 'true'),
+  // Telegram — bot token from @BotFather, webhook secret for incoming request auth
+  TELEGRAM_BOT_TOKEN: z.string().min(1),
+  TELEGRAM_WEBHOOK_SECRET: z.string().min(16).optional(),
   PUBLIC_BASE_URL: z.string().url().optional(),
 
   // LLM
