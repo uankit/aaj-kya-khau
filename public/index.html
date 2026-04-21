@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aaj Kya Khaun — Stop deciding, start cooking.</title>
+  <meta name="description" content="A Telegram food agent for Indian households. Drops your grocery bills into kitchen inventory, suggests meals from what you actually have, and nudges you at your meal times. Backed by IFCT 2017 and ICMR-NIN research." />
+  <meta property="og:title" content="Aaj Kya Khaun — Stop deciding, start cooking." />
+  <meta property="og:description" content="Your smart kitchen on Telegram. Inventory-aware meal suggestions for Indian households." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍽️%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <!-- ============ BACKGROUND DECO ============ -->
+  <div class="bg-deco" aria-hidden="true">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+    <div class="grain"></div>
+  </div>
+
+  <!-- ============ NAV ============ -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="/" class="logo">
+        <span class="logo-emoji">🍽️</span>
+        <span class="logo-text">Aaj Kya Khaun</span>
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#science">Science</a>
+        <a href="#preview">Demo</a>
+      </div>
+      <a href="https://t.me/aajkyakhaunbot" target="_blank" rel="noopener" class="nav-cta">Get started</a>
+    </div>
+  </nav>
+
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="hero-content">
+        <span class="pill">🔬 AI + nutrition science</span>
+
+        <h1 class="hero-title">
+          <span class="title-line line-1" data-text="Aaj Kya Khaun?">Aaj Kya Khaun?</span>
+          <span class="title-line line-2" data-text="Stop deciding, start cooking.">
+            <span class="highlight">Stop deciding,</span>
+            <span class="highlight">start cooking.</span>
+          </span>
+        </h1>
+
+        <p class="hero-sub">
+          A Telegram food agent for Indian households. Drop your grocery bills from Blinkit, Zepto, BigBasket — it builds your kitchen inventory automatically and suggests meals from what you <em>actually</em> have. No more generic recipe spam.
+        </p>
+
+        <div class="hero-ctas">
+          <a href="https://t.me/aajkyakhaunbot" target="_blank" rel="noopener" class="btn btn-primary">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9.78 18.65L10.06 14.42L17.74 7.5C18.08 7.19 17.67 7.04 17.22 7.31L7.74 13.3L3.64 12C2.76 11.75 2.75 11.14 3.84 10.7L19.81 4.54C20.54 4.21 21.24 4.72 20.96 5.84L18.24 18.65C18.05 19.56 17.5 19.78 16.74 19.36L12.6 16.3L10.61 18.23C10.38 18.46 10.19 18.65 9.78 18.65Z" fill="currentColor"/>
+            </svg>
+            Start on Telegram
+          </a>
+          <a href="#how-it-works" class="btn btn-secondary">See how it works</a>
+        </div>
+
+        <div class="hero-microcopy">
+          <div class="micro-item">✨ Built for Indian households</div>
+          <div class="micro-item">📄 Drops your grocery bills</div>
+          <div class="micro-item">🚫 Zero generic recipe spam</div>
+        </div>
+      </div>
+
+      <!-- Floating mockup: telegram chat preview -->
+      <div class="hero-visual">
+        <div class="chat-frame">
+          <div class="chat-header">
+            <div class="chat-avatar">🍽️</div>
+            <div class="chat-meta">
+              <div class="chat-name">Aaj Kya Khaun</div>
+              <div class="chat-status">online</div>
+            </div>
+          </div>
+          <div class="chat-body">
+            <div class="chat-bubble user">I'm hungry 🤌</div>
+            <div class="chat-bubble bot">
+              Bhook lagi? You've got <b>eggs, bread, cheese, tomato</b> — straight-up cheese omelette + toast?
+            </div>
+            <div class="chat-bubble user">healthy version?</div>
+            <div class="chat-bubble bot">
+              Veggie omelette (2 eggs, tomato, onion) + 1 toast<br>
+              ≈ 280 cal · 18g protein · 12g carbs 💪
+            </div>
+            <div class="chat-bubble user">done</div>
+            <div class="chat-bubble bot">Logged! You're at 45% of today's target 🎯</div>
+          </div>
+        </div>
+
+        <!-- Floating ingredient chips -->
+        <div class="chip chip-1">🥚 eggs</div>
+        <div class="chip chip-2">🥛 milk</div>
+        <div class="chip chip-3">🧀 paneer</div>
+        <div class="chip chip-4">🌶️ chilli</div>
+        <div class="chip chip-5">🍞 bread</div>
+        <div class="chip chip-6">🍅 tomato</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WHY DIFFERENT ============ -->
+  <section class="why">
+    <div class="container">
+      <div class="section-label">Why this is different</div>
+      <h2 class="section-title">
+        Most food apps give you <span class="strike">generic recipes.</span>
+        <br>This one knows your kitchen.
+      </h2>
+      <div class="why-grid">
+        <div class="why-card">
+          <div class="why-icon">🤖</div>
+          <h3>Generic AI bots</h3>
+          <p>"Here's 10 paneer recipes!" — but you don't have paneer. Or cream. Or half the masalas. Useless.</p>
+        </div>
+        <div class="why-card why-card-highlight">
+          <div class="why-icon">🍽️</div>
+          <h3>Aaj Kya Khaun</h3>
+          <p>Reads your Blinkit bill. Knows you have eggs, bread, onion. Suggests an omelette with ingredients you own. Logs it. Moves on.</p>
+        </div>
+        <div class="why-card">
+          <div class="why-icon">📱</div>
+          <h3>Other recipe apps</h3>
+          <p>Scroll through 50 recipes. Open fridge. Realize you have none of it. Order Swiggy again.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES GRID ============ -->
+  <section id="features" class="features">
+    <div class="container">
+      <div class="section-label">What it does</div>
+      <h2 class="section-title">Master your kitchen effortlessly.</h2>
+      <p class="section-sub">Smart nudges to avoid junk choices, friendly enough to nudge you when you're hungry.</p>
+
+      <div class="feature-grid">
+        <div class="feature-card card-invoice">
+          <div class="feature-icon">📄</div>
+          <h3>Invoice parsing</h3>
+          <p>Drop grocery bill PDFs from Blinkit, Zepto, BigBasket. Inventory updates itself, zero manual typing.</p>
+          <div class="feature-demo">
+            <div class="demo-chip demo-in">Blinkit_Invoice.pdf</div>
+            <div class="demo-arrow">→</div>
+            <div class="demo-chip demo-out">14 items added</div>
+          </div>
+        </div>
+
+        <div class="feature-card card-inventory">
+          <div class="feature-icon">📦</div>
+          <h3>Inventory tracking</h3>
+          <p>Always knows what's in your kitchen. Marks items as finished when you've used them. Updates on every invoice.</p>
+          <div class="feature-demo">
+            <span class="mini-chip">milk 1L</span>
+            <span class="mini-chip">eggs 12</span>
+            <span class="mini-chip">paneer 200g</span>
+            <span class="mini-chip">atta 5kg</span>
+            <span class="mini-chip">+12 more</span>
+          </div>
+        </div>
+
+        <div class="feature-card card-suggestions">
+          <div class="feature-icon">🥘</div>
+          <h3>Smart suggestions</h3>
+          <p>No more decision fatigue. Meals you can actually make — from what you already have, matching your diet and what you ate yesterday.</p>
+          <div class="feature-demo">
+            <div class="mini-chip mini-chip-accent">poha</div>
+            <div class="mini-chip mini-chip-accent">upma</div>
+            <div class="mini-chip mini-chip-accent">paneer bhurji</div>
+          </div>
+        </div>
+
+        <div class="feature-card card-nudges">
+          <div class="feature-icon">⏰</div>
+          <h3>Scheduled nudges</h3>
+          <p>Gentle reminders at breakfast, lunch, dinner — your times, your timezone. No spam, no 6am rage-pings.</p>
+          <div class="feature-demo">
+            <span class="mini-chip">☀️ 8:30</span>
+            <span class="mini-chip">🍛 13:30</span>
+            <span class="mini-chip">🌙 21:00</span>
+          </div>
+        </div>
+
+        <div class="feature-card card-nutrition">
+          <div class="feature-icon">📊</div>
+          <h3>Nutrition tracking</h3>
+          <p>Calories, protein, carbs, fat — calculated from <b>IFCT 2017</b> data with <b>Mifflin-St Jeor</b> BMR and <b>ICMR-NIN</b> macro targets. Real science, not guesses.</p>
+          <div class="feature-demo">
+            <div class="macro-bar">
+              <div class="macro-fill" style="width:67%"></div>
+            </div>
+            <div class="macro-label">1420 / 2116 cal · 67%</div>
+          </div>
+        </div>
+
+        <div class="feature-card card-personality">
+          <div class="feature-icon">🤌</div>
+          <h3>Actually has a personality</h3>
+          <p>Casual, Hinglish-friendly, slightly cheeky. Like that friend who's always thinking about food — not a corporate bot.</p>
+          <div class="feature-demo">
+            <div class="quote-bubble">"Maggi again? Bold choice 😏"</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS ============ -->
+  <section id="how-it-works" class="how">
+    <div class="container">
+      <div class="section-label">How it works</div>
+      <h2 class="section-title">3 simple steps to flavor.</h2>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">01</div>
+          <div class="step-icon">📄</div>
+          <h3>Drop your invoice</h3>
+          <p>Forward your grocery app invoice PDF to our bot on Telegram.</p>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step">
+          <div class="step-number">02</div>
+          <div class="step-icon">📦</div>
+          <h3>Track inventory</h3>
+          <p>Our AI logs your ingredients and tracks shelf life. Zero setup.</p>
+        </div>
+        <div class="step-connector"></div>
+        <div class="step">
+          <div class="step-number">03</div>
+          <div class="step-icon">🍽️</div>
+          <h3>Get suggestions</h3>
+          <p>Receive personalised recipes based on your current kitchen, diet, and recent meals.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SCIENCE ============ -->
+  <section id="science" class="science">
+    <div class="container">
+      <div class="science-card">
+        <div class="science-header">
+          <div class="science-label">🔬 Built on peer-reviewed research</div>
+          <h2>Science over guesswork.</h2>
+          <p>Nutrition math isn't made up. Every calorie and macro target comes from the definitive Indian nutrition literature and validated global standards.</p>
+        </div>
+
+        <div class="science-grid">
+          <div class="citation-card">
+            <div class="citation-num">01</div>
+            <h4>Mifflin-St Jeor Equation</h4>
+            <p class="citation-meta">Am J Clin Nutr, 1990</p>
+            <p class="citation-body">Most accurate BMR formula for general populations. Used to calculate your baseline calorie burn.</p>
+          </div>
+
+          <div class="citation-card">
+            <div class="citation-num">02</div>
+            <h4>ICMR-NIN RDA 2020</h4>
+            <p class="citation-meta">National Institute of Nutrition, Hyderabad</p>
+            <p class="citation-body">India-specific macronutrient recommendations for protein, carbs, fat, and fiber.</p>
+          </div>
+
+          <div class="citation-card">
+            <div class="citation-num">03</div>
+            <h4>Indian Food Composition Tables 2017</h4>
+            <p class="citation-meta">Longvah T et al., NIN-ICMR</p>
+            <p class="citation-body">Lab-analyzed nutritional data for 500+ Indian foods. This is where every "paneer has 18g protein per 100g" comes from.</p>
+          </div>
+
+          <div class="citation-card">
+            <div class="citation-num">04</div>
+            <h4>WHO Technical Report 916</h4>
+            <p class="citation-meta">World Health Organization, 2003</p>
+            <p class="citation-body">Weight management targets: 500 cal/day deficit for sustainable loss, surplus for gain.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FINAL CTA ============ -->
+  <section id="preview" class="final-cta">
+    <div class="container">
+      <div class="cta-card">
+        <h2>Stop asking <em>"Aaj kya khaun?"</em><br>every single day.</h2>
+        <p>Your kitchen, your schedule, your goals. All in one Telegram chat.</p>
+        <a href="https://t.me/aajkyakhaunbot" target="_blank" rel="noopener" class="btn btn-primary btn-large">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M9.78 18.65L10.06 14.42L17.74 7.5C18.08 7.19 17.67 7.04 17.22 7.31L7.74 13.3L3.64 12C2.76 11.75 2.75 11.14 3.84 10.7L19.81 4.54C20.54 4.21 21.24 4.72 20.96 5.84L18.24 18.65C18.05 19.56 17.5 19.78 16.74 19.36L12.6 16.3L10.61 18.23C10.38 18.46 10.19 18.65 9.78 18.65Z" fill="currentColor"/>
+          </svg>
+          Start free on Telegram
+        </a>
+        <p class="cta-sub">No install · No signup · Just chat</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FOOTER ============ -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <div class="logo">
+            <span class="logo-emoji">🍽️</span>
+            <span class="logo-text">Aaj Kya Khaun</span>
+          </div>
+          <p>Your Telegram food agent, built for Indian households.</p>
+          <a href="https://t.me/aajkyakhaunbot" class="footer-cta">@aajkyakhaunbot →</a>
+        </div>
+
+        <div class="footer-refs">
+          <h4>Research & Data Sources</h4>
+          <p class="footer-refs-intro">Every nutrition calculation is grounded in peer-reviewed research. Full credit to:</p>
+          <ul>
+            <li>
+              <strong>Mifflin MD, St Jeor ST, Hill LA, Scott BJ, Daugherty SA, Koh YO.</strong>
+              "A new predictive equation for resting energy expenditure in healthy individuals."
+              <em>American Journal of Clinical Nutrition</em>, 1990;51(2):241–247.
+            </li>
+            <li>
+              <strong>ICMR-NIN Expert Group.</strong>
+              "Nutrient Requirements for Indians: Recommended Dietary Allowances and Estimated Average Requirements."
+              <em>Indian Council of Medical Research – National Institute of Nutrition, Hyderabad</em>, 2020.
+            </li>
+            <li>
+              <strong>Longvah T, Ananthan R, Bhaskarachary K, Venkaiah K.</strong>
+              "Indian Food Composition Tables."
+              <em>National Institute of Nutrition, ICMR</em>, 2017.
+            </li>
+            <li>
+              <strong>World Health Organization.</strong>
+              "Diet, Nutrition and the Prevention of Chronic Diseases."
+              <em>WHO Technical Report Series 916</em>, 2003.
+            </li>
+          </ul>
+          <p class="footer-refs-thanks">
+            Thank you to the researchers and institutions (NIN Hyderabad, ICMR, WHO, and the Mifflin-St Jeor authors) whose decades of work make evidence-based nutrition for Indian households possible. This product would be impossible without your data.
+          </p>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <div class="footer-legal">© 2026 Aaj Kya Khaun · Built with 🍽️ in India</div>
+        <div class="footer-social">
+          <a href="https://t.me/aajkyakhaunbot" target="_blank" rel="noopener">Telegram</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <script src="/static/script.js" defer></script>
+</body>
+</html>

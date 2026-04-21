@@ -1,11 +1,31 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import { env } from './config/env.js';
 import { pool } from './config/database.js';
 import { healthRoutes } from './routes/health.js';
 import { webhookRoutes } from './routes/webhook.js';
 import { loadAllSchedules } from './services/scheduler.js';
 import { loadAllNightlyCrons } from './services/nightly.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Resolve the public directory whether we're running from src (dev via tsx)
+// or dist (prod). In both cases, go up from this file's dir to find /public.
+function resolvePublicDir(): string {
+  const candidates = [
+    path.resolve(__dirname, '..', 'public'),       // dist/index.js → <root>/public
+    path.resolve(__dirname, '..', '..', 'public'), // src/index.ts  → <root>/public
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, 'index.html'))) return c;
+  }
+  throw new Error(`public/index.html not found. Tried: ${candidates.join(', ')}`);
+}
 
 const app = Fastify({
   logger: {
@@ -31,6 +51,19 @@ async function bootstrap() {
     max: 120,
     timeWindow: '1 minute',
     keyGenerator: (req) => req.ip,
+  });
+
+  // Serve CSS/JS/images from /public/ under the /static/ URL prefix.
+  const publicDir = resolvePublicDir();
+  await app.register(fastifyStatic, {
+    root: publicDir,
+    prefix: '/static/',
+  });
+
+  // Read landing page HTML once at boot — serve it at /
+  const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf-8');
+  app.get('/', async (_req, reply) => {
+    return reply.type('text/html; charset=utf-8').send(indexHtml);
   });
 
   await app.register(healthRoutes);
