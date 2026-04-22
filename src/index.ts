@@ -8,6 +8,7 @@ import { env } from './config/env.js';
 import { pool } from './config/database.js';
 import { healthRoutes } from './routes/health.js';
 import { webhookRoutes } from './routes/webhook.js';
+import { oauthRoutes } from './routes/oauth.js';
 import { loadAllSchedules } from './services/scheduler.js';
 import { loadAllNightlyCrons } from './services/nightly.js';
 
@@ -68,6 +69,7 @@ async function bootstrap() {
 
   await app.register(healthRoutes);
   await app.register(webhookRoutes);
+  await app.register(oauthRoutes);
 
   // Load all existing crons from the DB so they survive restarts.
   await loadAllSchedules();

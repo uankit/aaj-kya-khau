@@ -19,6 +19,8 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:prod": "node dist/db/seed.js",
+    "zepto:register-client": "tsx scripts/register-zepto-client.ts",
+    "zepto:register-postman": "tsx scripts/register-zepto-client.ts --postman",
     "railway:start": "npm run db:migrate:prod && npm run db:seed:prod && node dist/index.js"
   },
   "dependencies": {

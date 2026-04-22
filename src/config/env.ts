@@ -30,6 +30,22 @@ const envSchema = z.object({
 
   // Defaults
   DEFAULT_TIMEZONE: z.string().default('Asia/Kolkata'),
+
+  // Encryption — 32 bytes base64-encoded (generate: `openssl rand -base64 32`).
+  // Required once OAuth integrations are in use; optional for local dev without
+  // Zepto/Swiggy wired up. Validated shape if set.
+  ENCRYPTION_KEY: z
+    .string()
+    .optional()
+    .refine(
+      (v) => !v || Buffer.from(v, 'base64').length === 32,
+      'ENCRYPTION_KEY must be 32 bytes base64-encoded',
+    ),
+
+  // Zepto MCP OAuth client credentials. Register via
+  // `npm run zepto:register-client` after PUBLIC_BASE_URL is set.
+  ZEPTO_CLIENT_ID: z.string().optional(),
+  ZEPTO_REGISTRATION_ACCESS_TOKEN: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

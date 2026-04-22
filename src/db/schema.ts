@@ -340,3 +340,71 @@ export type NewMealLog = typeof mealLogs.$inferInsert;
 
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+
+/* ------------------------------------------------------------------ */
+/* connected_accounts — OAuth-linked external grocery accounts        */
+/*                                                                    */
+/* One row per (user, provider). Access/refresh tokens are stored     */
+/* AES-256-GCM encrypted. Decryption only happens inside the MCP      */
+/* adapter layer; tokens never leave this module in plaintext and are */
+/* never returned from any agent tool call.                           */
+/* ------------------------------------------------------------------ */
+
+export const oauthProviderEnum = pgEnum('oauth_provider', ['zepto', 'swiggy_instamart']);
+
+export const accountStatusEnum = pgEnum('account_status', ['active', 'expired', 'revoked']);
+
+export const connectedAccounts = pgTable(
+  'connected_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: oauthProviderEnum('provider').notNull(),
+    accessTokenCiphertext: text('access_token_ciphertext').notNull(),
+    refreshTokenCiphertext: text('refresh_token_ciphertext'),
+    tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }),
+    scopes: text('scopes'),
+    status: accountStatusEnum('status').notNull().default('active'),
+    connectedAt: timestamp('connected_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+  },
+  (table) => ({
+    userProviderUnique: uniqueIndex('connected_accounts_user_provider_unique').on(
+      table.userId,
+      table.provider,
+    ),
+  }),
+);
+
+export const connectedAccountsRelations = relations(connectedAccounts, ({ one }) => ({
+  user: one(users, { fields: [connectedAccounts.userId], references: [users.id] }),
+}));
+
+export type ConnectedAccount = typeof connectedAccounts.$inferSelect;
+export type NewConnectedAccount = typeof connectedAccounts.$inferInsert;
+
+/* ------------------------------------------------------------------ */
+/* oauth_pending_states — ephemeral state for in-flight OAuth flows   */
+/*                                                                    */
+/* When a user taps "Connect Zepto" we stash {userId, code_verifier}  */
+/* keyed by a random `state` param. On callback we look up the state  */
+/* and finish the PKCE exchange. Rows are pruned opportunistically.   */
+/* ------------------------------------------------------------------ */
+
+export const oauthPendingStates = pgTable(
+  'oauth_pending_states',
+  {
+    state: varchar('state', { length: 64 }).primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: oauthProviderEnum('provider').notNull(),
+    codeVerifier: varchar('code_verifier', { length: 128 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    createdAtIdx: index('oauth_pending_states_created_at_idx').on(table.createdAt),
+  }),
+);
