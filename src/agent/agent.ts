@@ -140,7 +140,7 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
     }
 
     // ── 5. Call LLM with tools ─────────────────────────────────────────────
-    const tools = buildTools(userId);
+    const tools = await buildTools(userId);
 
     const result = await generateText({
       model,

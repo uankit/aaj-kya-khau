@@ -17,14 +17,17 @@ import { registerMealCron, unregisterMealCron } from '../services/scheduler.js';
 import { registerNightlyCron } from '../services/nightly.js';
 import { saveHealthProfile, estimateMealNutrition, getDailySummary, type FoodPortion } from '../services/nutrition.js';
 import { parseTimeOfDay, formatTimeOfDay, todayInTimezone } from '../utils/time.js';
+import { buildZeptoTools } from './zepto-tools.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('tools');
 
 const MEAL_TYPE = z.enum(['breakfast', 'lunch', 'snack', 'dinner']);
 
-export function buildTools(userId: string) {
-  return {
+export async function buildTools(userId: string) {
+  const zeptoTools = await buildZeptoTools(userId);
+
+  const staticTools = {
     add_inventory_item: tool({
       description:
         'Add a single item to the user\'s kitchen inventory. Use this when the user says "add X" or "I just bought X".',
@@ -295,6 +298,8 @@ export function buildTools(userId: string) {
       },
     }),
   };
+
+  return { ...staticTools, ...zeptoTools };
 }
 
 export type AgentTools = ReturnType<typeof buildTools>;
