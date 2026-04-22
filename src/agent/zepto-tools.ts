@@ -39,11 +39,66 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('zepto-tools');
 
 const TOOL_CACHE_TTL_MS = 60 * 60 * 1000;
-const DEFAULT_MAX_CHARS = 1500;
+const DEFAULT_MAX_CHARS = 800;
 const SEARCH_MAX_ITEMS = 3;
 
-/** Zepto MCP tools we skip. Not useful for our flow + adds prompt bloat. */
-const EXCLUDED_TOOLS: ReadonlySet<string> = new Set(['get_user_preferences']);
+/**
+ * Only expose tools the agent actually needs for the search → cart →
+ * checkout flow. Everything else (past orders, addresses, preferences,
+ * etc.) adds ~300-500 tokens of JSON schema per tool and tempts the LLM
+ * into exploratory calls that blow the rate limit. If a feature needs a
+ * new tool, add its pattern here explicitly — opt-in, not opt-out.
+ */
+function isEssentialTool(name: string): boolean {
+  if (/search|find|lookup|query/i.test(name)) return true;
+  if (/cart|basket/i.test(name)) return true; // add, update, remove, view
+  if (/checkout|place.?order|create.?order/i.test(name)) return true;
+  return false;
+}
+
+/**
+ * Fields worth keeping on each product/cart-item when we hand structured
+ * data to the LLM. Everything else (imageUrl, mrp, availability, ad flags,
+ * descriptions, tags) is wasted tokens for our cart/checkout flow.
+ */
+const PRODUCT_FIELD_WHITELIST: ReadonlySet<string> = new Set([
+  'id',
+  'productId',
+  'product_id',
+  'variantId',
+  'variant_id',
+  'productVariantId',
+  'storeProductId',
+  'store_product_id',
+  'cartProductId',
+  'skuId',
+  'sku_id',
+  'name',
+  'title',
+  'displayName',
+  'price',
+  'sellingPrice',
+  'packSize',
+  'pack_size',
+  'unit',
+  'quantity',
+  'qty',
+]);
+
+function pickWhitelistedFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(pickWhitelistedFields);
+  if (!value || typeof value !== 'object') return value;
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (PRODUCT_FIELD_WHITELIST.has(k)) {
+      out[k] = v;
+    }
+  }
+  // If nothing matched (the object isn't product-shaped), keep it as-is
+  // so we don't silently drop useful metadata like an order id.
+  return Object.keys(out).length > 0 ? out : value;
+}
 
 let toolsCache: { fetchedAt: number; tools: McpTool[] } | null = null;
 
@@ -52,10 +107,11 @@ async function getCachedZeptoTools(accessToken: string): Promise<McpTool[]> {
     return toolsCache.tools;
   }
   const all = await listZeptoTools(accessToken);
-  const tools = all.filter((t) => !EXCLUDED_TOOLS.has(t.name));
+  const tools = all.filter((t) => isEssentialTool(t.name));
   toolsCache = { fetchedAt: Date.now(), tools };
   log.info(
-    `Loaded ${tools.length} Zepto MCP tools (filtered ${all.length - tools.length})`,
+    `Loaded ${tools.length} essential Zepto MCP tools (filtered ${all.length - tools.length} non-essential)`,
+    { kept: tools.map((t) => t.name) },
   );
   return tools;
 }
@@ -176,7 +232,25 @@ function filterSearchResult(raw: string): string {
     : trimmed;
 }
 
-const STRUCTURED_MAX_CHARS = 2000;
+const STRUCTURED_MAX_CHARS = 900;
+
+/**
+ * Build a compact structured-data payload for the LLM. Takes the raw
+ * MCP-structured payload, finds the product array if there is one,
+ * trims to top N, and whitelists only the fields we need for tool args.
+ * Falls back to the raw (minus whitelist trim) if nothing matches.
+ */
+function compactStructured(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+
+  const productList = findProductArray(raw);
+  const scoped = productList ? productList.slice(0, SEARCH_MAX_ITEMS) : raw;
+  const trimmed = pickWhitelistedFields(scoped);
+
+  let str = JSON.stringify(trimmed);
+  if (str.length > STRUCTURED_MAX_CHARS) str = str.slice(0, STRUCTURED_MAX_CHARS) + '…';
+  return str;
+}
 
 /**
  * For search tools, combine display prose (for the user) with structured
@@ -188,41 +262,32 @@ function summarizeSearchResult(r: McpToolResult): string {
   const structured = extractStructured(r);
 
   if (!structured) {
-    // No structured channel → the LLM really has no IDs. Flag explicitly
-    // so it doesn't pretend it can order from prose alone.
-    return `${prose}\n\n[NOTE: Zepto returned no structured product data — product IDs unavailable for this result. You cannot add to cart from this search; tell the user the search didn't return orderable data and ask to try a different query.]`;
+    return `${prose}\n\n[NOTE: Zepto returned no structured product data — IDs unavailable. Tell the user the search didn't return orderable data. Do NOT retry with a different query in the same turn.]`;
   }
 
-  // Trim the products array to top N (match what the prose shows) and
-  // keep only fields likely to matter for cart / display. This is the
-  // data the LLM uses to build add-to-cart args.
-  const productList = findProductArray(structured);
-  let structuredForLlm: unknown;
-  if (productList && productList.length > SEARCH_MAX_ITEMS) {
-    structuredForLlm = productList.slice(0, SEARCH_MAX_ITEMS);
-  } else {
-    structuredForLlm = structured;
+  const compact = compactStructured(structured);
+  if (!compact) {
+    return `${prose}\n\n[NOTE: Structured product data was empty after trimming.]`;
   }
 
-  let structuredStr = JSON.stringify(structuredForLlm);
-  if (structuredStr.length > STRUCTURED_MAX_CHARS) {
-    structuredStr = structuredStr.slice(0, STRUCTURED_MAX_CHARS) + '…';
-  }
-
-  return `DISPLAY (show these options to the user, numbered):\n${prose}\n\nDATA (use these fields when calling add-to-cart / update-cart; option [N] here matches option [N] above):\n${structuredStr}`;
+  return `DISPLAY (show the user, numbered):\n${prose}\n\nDATA (use these IDs for add-to-cart / update-cart; option [N] in DATA lines up with [N] in DISPLAY):\n${compact}`;
 }
 
 function summarizeResult(toolName: string, r: McpToolResult): string {
   if (isSearchTool(toolName)) return summarizeSearchResult(r);
+
   const flattened = flattenMcpContent(r);
-  // For non-search tools, still surface any structured payload so things
-  // like cart responses / order confirmations include order IDs etc.
-  const structured = extractStructured(r);
-  const structuredStr = structured ? `\n\nDATA: ${JSON.stringify(structured).slice(0, STRUCTURED_MAX_CHARS)}` : '';
   const body = flattened.length > DEFAULT_MAX_CHARS
     ? flattened.slice(0, DEFAULT_MAX_CHARS) + `\n…[truncated ${flattened.length - DEFAULT_MAX_CHARS} chars]`
     : flattened;
-  return body + structuredStr;
+
+  // Surface structured data on cart/checkout responses too (order IDs,
+  // cart items). Always whitelist-trimmed so responses stay compact.
+  const structured = extractStructured(r);
+  const compact = structured ? compactStructured(structured) : null;
+  const dataSection = compact ? `\n\nDATA: ${compact}` : '';
+
+  return body + dataSection;
 }
 
 /**
