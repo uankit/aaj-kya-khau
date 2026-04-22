@@ -67,6 +67,51 @@ function flattenMcpContent(r: McpToolResult): string {
     .join('\n');
 }
 
+/**
+ * Collect the structured (machine-readable) payload from an MCP response.
+ *
+ * MCP servers may return both display prose (content[].text) AND structured
+ * JSON — either as a top-level `structuredContent` field or as `_meta` on
+ * individual content blocks. Zepto uses both patterns depending on the tool.
+ * Product IDs live ONLY in the structured channel; without surfacing it to
+ * the LLM, cart / checkout tools can never be called with correct args.
+ */
+function extractStructured(r: McpToolResult): unknown | null {
+  // Top-level structuredContent is the modern MCP standard (MCP spec ≥2025-03).
+  const top = (r as { structuredContent?: unknown }).structuredContent;
+  if (top !== undefined && top !== null) return top;
+
+  // Fallback: per-content-block _meta (what Zepto emits today).
+  if (r.content) {
+    for (const block of r.content) {
+      const meta = (block as { _meta?: unknown })._meta;
+      if (meta && typeof meta === 'object') return meta;
+    }
+  }
+
+  return null;
+}
+
+/** Walk a parsed JSON value to find the first array of product-like objects. */
+function findProductArray(parsed: unknown): unknown[] | null {
+  if (!parsed) return null;
+  if (Array.isArray(parsed)) return parsed.length > 0 ? parsed : null;
+  if (typeof parsed !== 'object') return null;
+
+  const obj = parsed as Record<string, unknown>;
+  for (const key of ['products', 'items', 'results', 'data', 'productList', 'catalog'] as const) {
+    const v = obj[key];
+    if (Array.isArray(v) && v.length > 0) return v;
+  }
+  for (const v of Object.values(obj)) {
+    if (v && (Array.isArray(v) || typeof v === 'object')) {
+      const nested = findProductArray(v);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
 function isSearchTool(name: string): boolean {
   return /search|find|lookup|query/i.test(name);
 }
@@ -131,12 +176,53 @@ function filterSearchResult(raw: string): string {
     : trimmed;
 }
 
+const STRUCTURED_MAX_CHARS = 2000;
+
+/**
+ * For search tools, combine display prose (for the user) with structured
+ * JSON (for tool args). Without the JSON, the LLM has no product IDs and
+ * can't call add-to-cart / update-cart.
+ */
+function summarizeSearchResult(r: McpToolResult): string {
+  const prose = filterSearchResult(flattenMcpContent(r));
+  const structured = extractStructured(r);
+
+  if (!structured) {
+    // No structured channel → the LLM really has no IDs. Flag explicitly
+    // so it doesn't pretend it can order from prose alone.
+    return `${prose}\n\n[NOTE: Zepto returned no structured product data — product IDs unavailable for this result. You cannot add to cart from this search; tell the user the search didn't return orderable data and ask to try a different query.]`;
+  }
+
+  // Trim the products array to top N (match what the prose shows) and
+  // keep only fields likely to matter for cart / display. This is the
+  // data the LLM uses to build add-to-cart args.
+  const productList = findProductArray(structured);
+  let structuredForLlm: unknown;
+  if (productList && productList.length > SEARCH_MAX_ITEMS) {
+    structuredForLlm = productList.slice(0, SEARCH_MAX_ITEMS);
+  } else {
+    structuredForLlm = structured;
+  }
+
+  let structuredStr = JSON.stringify(structuredForLlm);
+  if (structuredStr.length > STRUCTURED_MAX_CHARS) {
+    structuredStr = structuredStr.slice(0, STRUCTURED_MAX_CHARS) + '…';
+  }
+
+  return `DISPLAY (show these options to the user, numbered):\n${prose}\n\nDATA (use these fields when calling add-to-cart / update-cart; option [N] here matches option [N] above):\n${structuredStr}`;
+}
+
 function summarizeResult(toolName: string, r: McpToolResult): string {
+  if (isSearchTool(toolName)) return summarizeSearchResult(r);
   const flattened = flattenMcpContent(r);
-  if (isSearchTool(toolName)) return filterSearchResult(flattened);
-  return flattened.length > DEFAULT_MAX_CHARS
+  // For non-search tools, still surface any structured payload so things
+  // like cart responses / order confirmations include order IDs etc.
+  const structured = extractStructured(r);
+  const structuredStr = structured ? `\n\nDATA: ${JSON.stringify(structured).slice(0, STRUCTURED_MAX_CHARS)}` : '';
+  const body = flattened.length > DEFAULT_MAX_CHARS
     ? flattened.slice(0, DEFAULT_MAX_CHARS) + `\n…[truncated ${flattened.length - DEFAULT_MAX_CHARS} chars]`
     : flattened;
+  return body + structuredStr;
 }
 
 /**
