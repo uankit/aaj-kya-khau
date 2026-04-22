@@ -25,6 +25,15 @@ export const ZEPTO = {
 } as const;
 
 /**
+ * MCP resource indicator (RFC 8707) — binds the issued access token to the
+ * Zepto MCP endpoint. Without this the auth server issues a token with the
+ * wrong audience and the MCP rejects it with:
+ *   401 "The token is not intended for this resource"
+ * Matches the `resource` field from /.well-known/oauth-protected-resource.
+ */
+export const ZEPTO_MCP_RESOURCE = 'https://mcp.zepto.co.in';
+
+/**
  * Postman's public OAuth relay page. Displays the auth code for the user to
  * copy back. We use this because Zepto's registration server whitelists only
  * a small set of redirect domains (localhost, oauth.pstmn.io, claude.ai,
@@ -72,6 +81,7 @@ export function buildAuthorizationUrl(params: {
   url.searchParams.set('state', params.state);
   url.searchParams.set('code_challenge', params.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('resource', ZEPTO_MCP_RESOURCE);
   return url.toString();
 }
 
@@ -96,6 +106,7 @@ export async function exchangeCodeForTokens(params: {
     code: params.code,
     redirect_uri: params.redirectUri,
     code_verifier: params.codeVerifier,
+    resource: ZEPTO_MCP_RESOURCE,
   });
 
   const response = await fetch(ZEPTO.tokenEndpoint, {

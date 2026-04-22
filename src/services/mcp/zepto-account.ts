@@ -11,7 +11,7 @@ import { db } from '../../config/database.js';
 import { env } from '../../config/env.js';
 import { connectedAccounts } from '../../db/schema.js';
 import { decrypt, encrypt } from '../../utils/crypto.js';
-import { ZEPTO } from '../oauth/zepto.js';
+import { ZEPTO, ZEPTO_MCP_RESOURCE } from '../oauth/zepto.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('zepto-account');
@@ -31,6 +31,7 @@ async function refreshAccessToken(refreshToken: string): Promise<{
     grant_type: 'refresh_token',
     client_id: env.ZEPTO_CLIENT_ID,
     refresh_token: refreshToken,
+    resource: ZEPTO_MCP_RESOURCE,
   });
 
   const res = await fetch(ZEPTO.tokenEndpoint, {
