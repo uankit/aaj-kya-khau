@@ -71,6 +71,30 @@ function flattenMcpContent(r: McpToolResult): string {
     .join('\n');
 }
 
+function firstJsonFromMcpResult(r: McpToolResult): unknown | null {
+  const candidates: string[] = [];
+  if (r.content) {
+    for (const block of r.content) {
+      if (block.type === 'text' && typeof block.text === 'string') candidates.push(block.text);
+      else candidates.push(JSON.stringify(block));
+    }
+  }
+  candidates.push(JSON.stringify(r));
+
+  for (const raw of candidates) {
+    const text = raw.trim();
+    if (!text) continue;
+    if (text.startsWith('{') || text.startsWith('[')) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        // try next candidate
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Filter a Zepto search response down to the top N most-relevant products.
  *
@@ -143,18 +167,41 @@ function listFromParsedJson(parsed: unknown): unknown[] | null {
   if (Array.isArray(parsed)) return parsed;
   if (!parsed || typeof parsed !== 'object') return null;
   const obj = parsed as Record<string, unknown>;
-  for (const key of ['products', 'items', 'results', 'data'] as const) {
+  for (const key of ['products', 'items', 'results', 'data', 'productList', 'catalog'] as const) {
     const value = obj[key];
     if (Array.isArray(value)) return value;
+    if (value && typeof value === 'object') {
+      const nested = listFromParsedJson(value);
+      if (nested) return nested;
+    }
+  }
+  for (const value of Object.values(obj)) {
+    if (value && typeof value === 'object') {
+      const nested = listFromParsedJson(value);
+      if (nested) return nested;
+    }
   }
   return null;
 }
 
-function stringField(obj: Record<string, unknown>, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = obj[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-    if (typeof value === 'number') return String(value);
+function stringFieldDeep(raw: unknown, keys: string[]): string | undefined {
+  const normalized = new Set(keys.map((k) => k.toLowerCase().replace(/[^a-z0-9]/g, '')));
+  const seen = new Set<unknown>();
+  const stack: unknown[] = [raw];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+
+    for (const [key, value] of Object.entries(current as Record<string, unknown>)) {
+      const nk = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (normalized.has(nk)) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+        if (typeof value === 'number') return String(value);
+      }
+      if (value && typeof value === 'object') stack.push(value);
+    }
   }
   return undefined;
 }
@@ -165,18 +212,25 @@ function optionFromRaw(raw: unknown, idx: number): ZeptoProductOption {
     return {
       optionNumber: idx + 1,
       title:
-        stringField(obj, ['name', 'title', 'productName', 'displayName', 'itemName']) ??
+        stringFieldDeep(obj, ['name', 'title', 'productName', 'displayName', 'itemName']) ??
         `Option ${idx + 1}`,
-      subtitle: stringField(obj, ['packSize', 'unit', 'quantity', 'variant', 'weight']),
-      price: stringField(obj, ['price', 'sellingPrice', 'mrp', 'finalPrice', 'amount']),
-      eta: stringField(obj, ['eta', 'deliveryEta', 'deliveryTime', 'timeToDeliver']),
+      subtitle: stringFieldDeep(obj, ['packSize', 'unit', 'quantity', 'variant', 'weight']),
+      price: stringFieldDeep(obj, ['price', 'sellingPrice', 'mrp', 'finalPrice', 'amount']),
+      eta: stringFieldDeep(obj, ['eta', 'deliveryEta', 'deliveryTime', 'timeToDeliver']),
       raw,
     };
   }
   return { optionNumber: idx + 1, title: String(raw), raw };
 }
 
-function parseProductOptions(raw: string): ZeptoProductOption[] {
+function parseProductOptionsFromResult(result: McpToolResult, summary: string): ZeptoProductOption[] {
+  const parsed = firstJsonFromMcpResult(result);
+  const list = listFromParsedJson(parsed);
+  if (list) return list.slice(0, SEARCH_MAX_ITEMS).map(optionFromRaw);
+  return parseProductOptionsFromText(summary);
+}
+
+function parseProductOptionsFromText(raw: string): ZeptoProductOption[] {
   const trimmed = raw.trim().replace(/\n…\(.+$/, '').replace(/\n…\[truncated .+$/, '');
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
     try {
@@ -277,12 +331,20 @@ export async function buildZeptoTools(userId: string): Promise<Record<string, To
 
           const addToCartTool = mcpTools.find((t) => isCartTool(t.name));
           const checkoutTool = mcpTools.find((t) => isCheckoutTool(t.name));
+          const productOptions = parseProductOptionsFromResult(result, summary);
+          log.info('Zepto search stored workflow options', {
+            userId,
+            searchTool: mt.name,
+            optionCount: productOptions.length,
+            addTool: addToCartTool?.name,
+            checkoutTool: checkoutTool?.name,
+          });
           await saveZeptoSearchTask({
             userId,
             searchTool: mt.name,
             searchArgs: args,
             searchResult: summary,
-            productOptions: parseProductOptions(summary),
+            productOptions,
             addToCartTool: toolRef(addToCartTool),
             checkoutTool: toolRef(checkoutTool),
           });

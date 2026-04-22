@@ -21,6 +21,8 @@ const ArgsSchema = z.object({
   args: z.record(z.unknown()),
 });
 
+const LooseArgsSchema = z.record(z.unknown());
+
 export interface WorkflowReply {
   text: string;
   completed?: boolean;
@@ -47,6 +49,14 @@ function normalizedKey(value: string): string {
 function aliasesFor(prop: string): string[] {
   const n = normalizedKey(prop);
   const out = new Set<string>([prop, n]);
+  if (n === 'id') {
+    out.add('id');
+    out.add('productId');
+    out.add('variantId');
+    out.add('skuId');
+    out.add('productVariantId');
+    out.add('storeProductId');
+  }
   if (n.includes('variant')) {
     out.add('variantId');
     out.add('variant_id');
@@ -69,7 +79,70 @@ function aliasesFor(prop: string): string[] {
     out.add('quantity');
     out.add('qty');
   }
+  if (n.includes('store')) {
+    out.add('storeId');
+    out.add('store_id');
+    out.add('outletId');
+    out.add('outlet_id');
+  }
   return [...out];
+}
+
+function hasIdentifier(raw: unknown): boolean {
+  return (
+    findValueDeep(raw, [
+      'id',
+      'productId',
+      'product_id',
+      'variantId',
+      'variant_id',
+      'skuId',
+      'sku_id',
+      'productVariantId',
+      'storeProductId',
+    ]) !== undefined
+  );
+}
+
+function primitiveValues(raw: unknown): Set<string> {
+  const out = new Set<string>();
+  const seen = new Set<unknown>();
+  const stack: unknown[] = [raw];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === null || current === undefined || seen.has(current)) continue;
+    if (typeof current === 'string' || typeof current === 'number' || typeof current === 'boolean') {
+      out.add(String(current));
+      continue;
+    }
+    if (typeof current === 'object') {
+      seen.add(current);
+      for (const value of Object.values(current as Record<string, unknown>)) stack.push(value);
+    }
+  }
+
+  return out;
+}
+
+function argsOnlyUseProductValues(args: unknown, product: ZeptoProductOption): boolean {
+  const allowed = primitiveValues(product.raw);
+  allowed.add('1');
+  allowed.add('COD');
+  allowed.add('true');
+  allowed.add('false');
+  allowed.add('default-device');
+
+  const values = primitiveValues(args);
+  for (const value of values) {
+    if (!allowed.has(value)) return false;
+  }
+  return true;
+}
+
+function rawKeyPreview(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object') return [];
+  return Object.keys(raw as Record<string, unknown>).slice(0, 25);
 }
 
 function findValueDeep(raw: unknown, aliases: string[]): unknown {
@@ -142,12 +215,13 @@ async function llmBuildArgs(
   tool: ZeptoToolRef,
   product: ZeptoProductOption,
 ): Promise<Record<string, unknown> | null> {
+  if (!hasIdentifier(product.raw)) return null;
   try {
     const { object } = await generateObject({
       model: fastModel,
-      schema: ArgsSchema,
+      schema: z.union([ArgsSchema, LooseArgsSchema]),
       system:
-        'Build JSON arguments for a grocery add-to-cart tool. Use only fields present in the product/search object. Do not invent ids. If quantity is required and absent, use 1.',
+        'Build JSON arguments for a grocery add-to-cart tool. Use only fields present in the product/search object. Do not invent ids. If quantity is required and absent, use 1. If a required id is unavailable, return an empty args object.',
       prompt: `Tool name: ${tool.name}
 Input JSON schema:
 ${JSON.stringify(tool.inputSchema)}
@@ -157,7 +231,12 @@ ${JSON.stringify(product.raw)}`,
       temperature: 0,
       abortSignal: AbortSignal.timeout(ARG_BUILD_TIMEOUT_MS),
     });
-    return object.args;
+    const args = (
+      'args' in object && typeof object.args === 'object' && object.args !== null
+        ? object.args
+        : object
+    ) as Record<string, unknown>;
+    return Object.keys(args).length > 0 && argsOnlyUseProductValues(args, product) ? args : null;
   } catch (err) {
     log.warn('LLM add-to-cart argument build failed', err);
     return null;
@@ -197,9 +276,19 @@ export async function selectZeptoOrderOption(
   const args =
     deterministicArgs(addTool.inputSchema, product.raw) ?? (await llmBuildArgs(addTool, product));
   if (!args || Object.keys(args).length === 0) {
+    log.warn('Unable to build Zepto add-to-cart args safely', {
+      userId,
+      optionNumber,
+      productTitle: product.title,
+      rawType: typeof product.raw,
+      rawKeys: rawKeyPreview(product.raw),
+      hasIdentifier: hasIdentifier(product.raw),
+      addToolName: addTool.name,
+      addToolSchema: addTool.inputSchema,
+    });
     return {
       text:
-        "I found the item, but Zepto didn't give me enough structured product data to safely order it. Search another option?",
+        "I found the item, but Zepto didn't expose enough product IDs for me to safely order it yet. Try another option, or search a more specific item?",
     };
   }
 
