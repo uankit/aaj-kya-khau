@@ -23,6 +23,7 @@ const envSchema = z.object({
   // LLM
   LLM_PROVIDER: z.enum(['anthropic', 'openai', 'google', 'ollama']).default('anthropic'),
   LLM_MODEL: z.string().default('claude-3-5-sonnet-20241022'),
+  LLM_FAST_MODEL: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   GOOGLE_GENERATIVE_AI_API_KEY: z.string().optional(),

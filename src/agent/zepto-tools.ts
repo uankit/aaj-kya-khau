@@ -27,7 +27,8 @@ import {
 } from '../services/mcp/zepto-client.js';
 import {
   saveZeptoSearchTask,
-  updateZeptoOrderTaskState,
+  type ZeptoProductOption,
+  type ZeptoToolRef,
 } from '../tasks/agent-task-store.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -138,6 +139,69 @@ function filterSearchResult(raw: string): string {
     : trimmed;
 }
 
+function listFromParsedJson(parsed: unknown): unknown[] | null {
+  if (Array.isArray(parsed)) return parsed;
+  if (!parsed || typeof parsed !== 'object') return null;
+  const obj = parsed as Record<string, unknown>;
+  for (const key of ['products', 'items', 'results', 'data'] as const) {
+    const value = obj[key];
+    if (Array.isArray(value)) return value;
+  }
+  return null;
+}
+
+function stringField(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number') return String(value);
+  }
+  return undefined;
+}
+
+function optionFromRaw(raw: unknown, idx: number): ZeptoProductOption {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    return {
+      optionNumber: idx + 1,
+      title:
+        stringField(obj, ['name', 'title', 'productName', 'displayName', 'itemName']) ??
+        `Option ${idx + 1}`,
+      subtitle: stringField(obj, ['packSize', 'unit', 'quantity', 'variant', 'weight']),
+      price: stringField(obj, ['price', 'sellingPrice', 'mrp', 'finalPrice', 'amount']),
+      eta: stringField(obj, ['eta', 'deliveryEta', 'deliveryTime', 'timeToDeliver']),
+      raw,
+    };
+  }
+  return { optionNumber: idx + 1, title: String(raw), raw };
+}
+
+function parseProductOptions(raw: string): ZeptoProductOption[] {
+  const trimmed = raw.trim().replace(/\n…\(.+$/, '').replace(/\n…\[truncated .+$/, '');
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const list = listFromParsedJson(parsed);
+      if (list) return list.slice(0, SEARCH_MAX_ITEMS).map(optionFromRaw);
+    } catch {
+      /* fall through */
+    }
+  }
+
+  const lines = trimmed.split('\n');
+  const itemLineRe = /^\s*(?:[•*\-–—]|\d+[.)])\s+(.+)/;
+  const items = lines
+    .map((line) => line.match(itemLineRe)?.[1]?.trim())
+    .filter((line): line is string => !!line)
+    .slice(0, SEARCH_MAX_ITEMS);
+
+  return items.map((line, idx) => ({
+    optionNumber: idx + 1,
+    title: line,
+    raw: line,
+  }));
+}
+
 /**
  * Summarize any Zepto MCP tool result for the LLM.
  *
@@ -168,6 +232,11 @@ function isCheckoutTool(toolName: string): boolean {
   return /checkout|place.?order|create.?order/i.test(toolName);
 }
 
+function toolRef(tool: McpTool | undefined): ZeptoToolRef | undefined {
+  if (!tool) return undefined;
+  return { name: tool.name, inputSchema: tool.inputSchema };
+}
+
 /**
  * Returns an object of tool definitions keyed by `zepto_<mcpToolName>`.
  * Returns {} if the user hasn't connected Zepto or if the MCP is unreachable.
@@ -188,6 +257,8 @@ export async function buildZeptoTools(userId: string): Promise<Record<string, To
 
   const out: Record<string, Tool> = {};
   for (const mt of mcpTools) {
+    if (!isSearchTool(mt.name)) continue;
+
     const agentName = `zepto_${mt.name}`;
     out[agentName] = tool({
       description: mt.description ?? `Zepto MCP tool: ${mt.name}`,
@@ -204,34 +275,17 @@ export async function buildZeptoTools(userId: string): Promise<Record<string, To
             return { error: summary };
           }
 
-          if (isSearchTool(mt.name)) {
-            await saveZeptoSearchTask({
-              userId,
-              searchTool: agentName,
-              searchArgs: args,
-              searchResult: summary,
-            });
-          } else if (isCartTool(mt.name)) {
-            await updateZeptoOrderTaskState({
-              userId,
-              patch: {
-                phase: 'cart_staged',
-                cartResult: summary,
-                updatedReason: 'zepto_cart',
-              },
-              status: 'active',
-            });
-          } else if (isCheckoutTool(mt.name)) {
-            await updateZeptoOrderTaskState({
-              userId,
-              patch: {
-                phase: 'checkout_attempted',
-                checkoutResult: summary,
-                updatedReason: 'zepto_checkout',
-              },
-              status: 'completed',
-            });
-          }
+          const addToCartTool = mcpTools.find((t) => isCartTool(t.name));
+          const checkoutTool = mcpTools.find((t) => isCheckoutTool(t.name));
+          await saveZeptoSearchTask({
+            userId,
+            searchTool: mt.name,
+            searchArgs: args,
+            searchResult: summary,
+            productOptions: parseProductOptions(summary),
+            addToCartTool: toolRef(addToCartTool),
+            checkoutTool: toolRef(checkoutTool),
+          });
 
           return { result: summary };
         } catch (err) {

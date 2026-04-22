@@ -7,19 +7,41 @@ const ZEPTO_ORDER_TTL_MS = 30 * 60 * 1000;
 
 export interface ZeptoSearchState {
   kind: 'zepto_order';
-  phase: 'awaiting_selection_or_confirmation' | 'cart_staged' | 'checkout_attempted';
+  phase:
+    | 'awaiting_selection'
+    | 'awaiting_confirmation'
+    | 'cart_staged'
+    | 'checkout_attempted';
   searchTool?: string;
   searchArgs?: unknown;
   searchResult?: string;
+  productOptions?: ZeptoProductOption[];
+  selectedProduct?: ZeptoProductOption;
+  addToCartTool?: ZeptoToolRef;
+  checkoutTool?: ZeptoToolRef;
+  addToCartArgs?: unknown;
   cartResult?: string;
   checkoutResult?: string;
   lastUserMessage?: string;
   selectedOptionNumber?: number;
-  finalConfirmationRequested?: boolean;
   updatedReason?: string;
 }
 
 export type ZeptoOrderTask = AgentTask & { state: ZeptoSearchState };
+
+export interface ZeptoToolRef {
+  name: string;
+  inputSchema: Record<string, unknown>;
+}
+
+export interface ZeptoProductOption {
+  optionNumber: number;
+  title: string;
+  subtitle?: string;
+  price?: string;
+  eta?: string;
+  raw: unknown;
+}
 
 function zeptoOrderExpiresAt(): Date {
   return new Date(Date.now() + ZEPTO_ORDER_TTL_MS);
@@ -57,14 +79,20 @@ export async function saveZeptoSearchTask(args: {
   searchTool: string;
   searchArgs: unknown;
   searchResult: string;
+  productOptions?: ZeptoProductOption[];
+  addToCartTool?: ZeptoToolRef;
+  checkoutTool?: ZeptoToolRef;
 }): Promise<void> {
   const existing = await getActiveZeptoOrderTask(args.userId);
   const state: ZeptoSearchState = {
     kind: 'zepto_order',
-    phase: 'awaiting_selection_or_confirmation',
+    phase: 'awaiting_selection',
     searchTool: args.searchTool,
     searchArgs: args.searchArgs,
     searchResult: args.searchResult,
+    productOptions: args.productOptions ?? [],
+    addToCartTool: args.addToCartTool,
+    checkoutTool: args.checkoutTool,
     updatedReason: 'zepto_search',
   };
 

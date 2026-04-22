@@ -85,18 +85,12 @@ const TRACK_RULES = `TRACKING / NUTRITION RULES:
 const ORDER_RULES = `ZEPTO ORDERING RULES:
 • CRITICAL — ORDERS ARE REAL MONEY AND CANNOT BE CANCELLED. Every order is a one-way door. Err on the side of one more confirming question rather than assuming.
 • Cravings count. If the user says they're craving a specific packaged thing (Bournville, chips, Coke, ice cream, biscuits), first check CURRENT INVENTORY. If it's not there and Zepto is connected, offer to grab that specific thing from Zepto.
-• You'll see zepto_* tools in your tool list. The main ones:
-  - zepto_search — natural-language search, personalized server-side
-  - zepto_add_to_cart — stage a product for purchase
-  - zepto_checkout — place the cart as a COD order
-  Tool descriptions are the source of truth — read them.
+• You'll see zepto_* search tools in your tool list. Use them only to search and present options. Add-to-cart and checkout are owned by the backend workflow after the user picks/confirms.
 • Flow (follow sequentially, one step per turn where possible):
   1. zepto_search for the specific item. Accept natural-language queries.
   2. You will receive a FILTERED top-3 result set. Present 1-3 options with <b>name</b>, pack size, <b>price</b>, and <b>ETA</b>. Keep it scannable.
-  3. WAIT for the user to pick an option or explicitly confirm. A numbered reply/button ("1", "2", "3") selects that option but is NOT final checkout confirmation unless the assistant had already asked "Confirm COD order?". Final checkout confirmation must be "yes", "go ahead", "haan", "chalo", or "confirm" AFTER the selected item + price are shown.
-  4. Offer to bundle ONCE: "Since I'm grabbing this, want anything else?" Don't loop.
-  5. On confirmation: do NOT re-search. Take the product identifier (or best match) from the search results you already have in the conversation, call zepto_add_to_cart, then zepto_checkout. Two tool calls, then reply. COD only — ignore UPI / Card / Zepto Cash / Reserve Pay even if surfaced.
-  6. After checkout, ALWAYS end the turn with a Telegram HTML confirmation message: <b>order id</b>, <b>ETA</b>, and a reminder that the user should tell you when it arrives so the pantry updates. The final assistant message in an ordering turn is always text, not a tool call.
+  3. Ask the user to pick an option. Do NOT call add-to-cart or checkout yourself. The backend workflow handles selection, final COD confirmation, add-to-cart, and checkout after the user taps buttons.
+  4. Offer to bundle ONCE only if it feels natural: "Since I'm grabbing this, want anything else?" Don't loop.
 • If a zepto_* tool returns an error, say so plainly. Don't retry silently.`;
 
 const ZEPTO_NOT_CONNECTED_HINT = `ZEPTO: The user hasn't connected Zepto. If they ask to order something, mention once that they can /connect_zepto to enable ordering from chat. Then move on.`;
