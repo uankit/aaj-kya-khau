@@ -53,6 +53,11 @@ function isEssentialTool(name: string): boolean {
   if (/search|find|lookup|query/i.test(name)) return true;
   if (/cart|basket/i.test(name)) return true; // add, update, remove, view
   if (/checkout|place.?order|create.?order/i.test(name)) return true;
+  // Zepto is hyperlocal — an active delivery address drives which dark
+  // store serves the user. If the session's default address isn't picked
+  // up automatically, the LLM needs these to list / select one, otherwise
+  // checkout fails with a generic Bad Request.
+  if (/address|location|pincode|delivery.?location/i.test(name)) return true;
   return false;
 }
 

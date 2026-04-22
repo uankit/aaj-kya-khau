@@ -98,7 +98,8 @@ const ORDER_RULES = `ZEPTO ORDERING RULES:
   6. After add-to-cart succeeds, call the Zepto checkout tool with COD as the payment method. Do not use UPI / Card / Zepto Cash / Reserve Pay even if the schema accepts them.
   7. After checkout, reply with plain text: order id (if returned), ETA, COD total. Remind the user to tell you when it arrives so the pantry updates.
 • If any Zepto tool returns an error, surface the error plainly to the user and STOP — don't retry silently with different args. Never place an order if add-to-cart failed.
-• Do NOT call checkout unless you've just successfully called add-to-cart in this same flow.`;
+• Do NOT call checkout unless you've just successfully called add-to-cart in this same flow.
+• ADDRESS HANDLING: Zepto is hyperlocal. Product availability and order placement depend on a delivery address being set on the user's Zepto account. Usually the user's default address is picked up automatically — DON'T preemptively call address tools. BUT: if search returns empty for something common (like "bread" or "milk") OR if checkout fails with a generic "Bad Request", it's very likely no delivery address is active. In that case: call the Zepto address-listing tool if available, see whether the user has one, and either select the default or tell the user to open the Zepto app and set a delivery address before retrying. Don't loop — one attempt to recover, then hand off.`;
 
 const ZEPTO_NOT_CONNECTED_HINT = `ZEPTO: The user hasn't connected Zepto. If they ask to order something, mention once that they can /connect_zepto to enable ordering from chat. Then move on.`;
 

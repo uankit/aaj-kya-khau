@@ -230,7 +230,9 @@ ${escapeHtml(authUrl)}
 3. Come back here and send:
 <code>/zepto_code PASTE_THE_CODE_HERE</code>
 
-(The link stays valid for 10 minutes.)`,
+(The link stays valid for 10 minutes.)
+
+<b>One heads-up:</b> Zepto is hyperlocal — make sure you have a <b>delivery address set on your Zepto account</b> before ordering through me, otherwise search & checkout will fail. If you've used Zepto before, you're good.`,
   );
   log.info(`/connect_zepto link (Postman OOB) issued to ${user.telegramId}`);
   return true;
