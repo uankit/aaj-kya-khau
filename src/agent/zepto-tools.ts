@@ -163,13 +163,62 @@ function filterSearchResult(raw: string): string {
     : trimmed;
 }
 
+function looksLikeProduct(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const keys = new Set(
+    Object.keys(value as Record<string, unknown>).map((key) =>
+      key.toLowerCase().replace(/[^a-z0-9]/g, ''),
+    ),
+  );
+  return [
+    'id',
+    'name',
+    'title',
+    'productid',
+    'variantid',
+    'productvariantid',
+    'storeproductid',
+    'skuid',
+    'price',
+    'sellingprice',
+    'mrp',
+    'displayname',
+    'itemname',
+  ].some((key) => keys.has(key));
+}
+
+function productListFromArray(value: unknown[]): unknown[] | null {
+  const products = value.filter(looksLikeProduct);
+  if (products.length > 0) return products;
+
+  for (const item of value) {
+    const nested = listFromParsedJson(item);
+    if (nested) return nested;
+  }
+
+  return null;
+}
+
 function listFromParsedJson(parsed: unknown): unknown[] | null {
-  if (Array.isArray(parsed)) return parsed;
+  if (Array.isArray(parsed)) return productListFromArray(parsed);
   if (!parsed || typeof parsed !== 'object') return null;
   const obj = parsed as Record<string, unknown>;
+
+  // MCP content blocks often look like { type, text, _meta }. The actual
+  // Zepto product payload, when present, lives under _meta; the text is only
+  // display prose and cannot safely power add-to-cart.
+  const meta = obj._meta ?? obj.meta ?? obj.metadata;
+  if (meta && typeof meta === 'object') {
+    const nested = listFromParsedJson(meta);
+    if (nested) return nested;
+  }
+
   for (const key of ['products', 'items', 'results', 'data', 'productList', 'catalog'] as const) {
     const value = obj[key];
-    if (Array.isArray(value)) return value;
+    if (Array.isArray(value)) {
+      const products = productListFromArray(value);
+      if (products) return products;
+    }
     if (value && typeof value === 'object') {
       const nested = listFromParsedJson(value);
       if (nested) return nested;

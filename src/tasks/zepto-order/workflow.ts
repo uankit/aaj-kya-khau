@@ -145,6 +145,13 @@ function rawKeyPreview(raw: unknown): string[] {
   return Object.keys(raw as Record<string, unknown>).slice(0, 25);
 }
 
+function nestedKeyPreview(raw: unknown, key: string): string[] {
+  if (!raw || typeof raw !== 'object') return [];
+  const value = (raw as Record<string, unknown>)[key];
+  if (!value || typeof value !== 'object') return [];
+  return Object.keys(value as Record<string, unknown>).slice(0, 25);
+}
+
 function findValueDeep(raw: unknown, aliases: string[]): unknown {
   const aliasSet = new Set(aliases.map(normalizedKey));
   const seen = new Set<unknown>();
@@ -282,6 +289,7 @@ export async function selectZeptoOrderOption(
       productTitle: product.title,
       rawType: typeof product.raw,
       rawKeys: rawKeyPreview(product.raw),
+      metaKeys: nestedKeyPreview(product.raw, '_meta'),
       hasIdentifier: hasIdentifier(product.raw),
       addToolName: addTool.name,
       addToolSchema: addTool.inputSchema,
