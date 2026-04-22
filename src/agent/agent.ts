@@ -19,29 +19,22 @@ import { generateText, type CoreMessage } from 'ai';
 import { db } from '../config/database.js';
 import { messages } from '../db/schema.js';
 import { model } from '../llm/client.js';
-import { sendHtml, sendText, type TelegramInlineKeyboard } from '../services/telegram.js';
+import { sendHtml } from '../services/telegram.js';
 import { parseAndSaveInvoice } from '../services/invoice.js';
 import { hasZeptoConnected } from '../services/mcp/zepto-account.js';
 import { loadContext } from './context.js';
 import { buildSystemPrompt, type TurnTrigger } from './system-prompt.js';
 import { buildTools } from './tools.js';
 import { classifyIntent, type Intent } from './intent.js';
+import { getActiveZeptoOrderTask } from '../tasks/agent-task-store.js';
 import { createLogger } from '../utils/logger.js';
-import {
-  cancelActiveZeptoOrderTask,
-  getActiveZeptoOrderTask,
-} from '../tasks/agent-task-store.js';
-import { parseZeptoOrderReply } from '../tasks/zepto-order/confirmations.js';
-import {
-  confirmZeptoOrder,
-  selectZeptoOrderOption,
-} from '../tasks/zepto-order/workflow.js';
 
 const log = createLogger('agent');
 
-// General agent turns can still use several tool steps (pantry, nutrition,
-// search). Zepto checkout is no longer in the LLM tool loop; it is handled by
-// the deterministic workflow in tasks/zepto-order/workflow.ts.
+// The LLM owns the full Zepto ordering flow end-to-end: search →
+// add-to-cart → checkout → text confirmation. 5 steps is enough headroom
+// for that sequence plus the occasional retry. Token cost is bounded by
+// per-tool-result filtering in zepto-tools.ts.
 const MAX_TOOL_STEPS = 5;
 // LLM hard ceiling. GPT-4o usually answers in <5s; anything over 30s is hung.
 // Hitting this limit aborts the request at the HTTP client level and we fall
@@ -121,36 +114,6 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
     // ── 3. Load context fresh (inventory will already reflect the PDF) ────
     const ctx = await loadContext(userId);
 
-    const activeZeptoOrder =
-      trigger.type === 'message' ? await getActiveZeptoOrderTask(userId) : null;
-    const activeZeptoReply =
-      trigger.type === 'message' && activeZeptoOrder
-        ? parseZeptoOrderReply(trigger.text)
-        : null;
-
-    if (activeZeptoReply?.kind === 'cancel') {
-      await cancelActiveZeptoOrderTask(userId);
-      await sendAndPersist(userId, 'Cancelled the Zepto order flow. No order placed 👍');
-      return;
-    }
-
-    if (activeZeptoReply?.kind === 'select' && activeZeptoReply.selectionNumber) {
-      const reply = await selectZeptoOrderOption(userId, activeZeptoReply.selectionNumber);
-      const replyKeyboard = await buildReplyKeyboard(userId);
-      await sendAndPersist(userId, reply.text, { html: true, inlineKeyboard: replyKeyboard });
-      return;
-    }
-
-    if (activeZeptoReply?.kind === 'confirm') {
-      const reply = await confirmZeptoOrder(userId);
-      const replyKeyboard = await buildReplyKeyboard(userId);
-      await sendAndPersist(userId, reply.text, {
-        html: true,
-        inlineKeyboard: reply.completed ? undefined : replyKeyboard,
-      });
-      return;
-    }
-
     // ── 3a. Classify intent for message turns ────────────────────────────
     // Drives which tools are loaded and which system prompt sections fire.
     // Non-message triggers (nudges/nightly) don't need classification — they
@@ -161,11 +124,21 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
       log.info(`turn intent=${intent} user=${userId}`);
     }
 
-    // Only relevant for order turns — we could defer this query but it's a
-    // single indexed lookup, cheap.
+    // Only relevant for order/cook/pantry turns — cheap indexed lookup.
     const zeptoConnected = intent === 'order' || intent === 'cook' || intent === 'pantry'
       ? await hasZeptoConnected(userId)
       : false;
+
+    // When the user is continuing an ordering flow (just searched, now
+    // they said "yes" or "the 2nd one"), pull the stored search summary.
+    // This is the only way the LLM can see product IDs from the previous
+    // turn's tool_result — Vercel AI SDK tool results aren't persisted in
+    // the messages table.
+    let activeOrderContext: string | undefined;
+    if (intent === 'order') {
+      const task = await getActiveZeptoOrderTask(userId);
+      if (task) activeOrderContext = task.state.searchResult;
+    }
 
     // ── 4. Build system prompt + messages ──────────────────────────────────
     const llmTrigger: TurnTrigger =
@@ -173,7 +146,11 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
         ? { type: 'message', text: trigger.text, hasPdf: pdfSummary !== null }
         : trigger;
 
-    const system = buildSystemPrompt(ctx, llmTrigger, { intent, zeptoConnected });
+    const system = buildSystemPrompt(ctx, llmTrigger, {
+      intent,
+      zeptoConnected,
+      activeOrderContext,
+    });
 
     const historyMessages: CoreMessage[] = ctx.history.map((m) => ({
       role: m.role,
@@ -246,8 +223,7 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
     }
 
     // ── 6 + 7. Persist + send ─────────────────────────────────────────────
-    const replyKeyboard = await buildReplyKeyboard(userId);
-    await sendAndPersist(userId, replyText, { html: true, inlineKeyboard: replyKeyboard });
+    await sendAndPersist(userId, replyText);
     log.debug(`Agent turn complete for ${userId}`, {
       toolCalls: result.toolCalls?.length ?? 0,
       steps: result.steps?.length ?? 0,
@@ -343,46 +319,13 @@ function sleep(ms: number): Promise<void> {
  * the user already got their reply and retrying would double-send. The
  * history will have a one-turn gap which is much better than a double text.
  */
-async function buildReplyKeyboard(userId: string): Promise<TelegramInlineKeyboard | undefined> {
-  const pendingOrder = await getActiveZeptoOrderTask(userId);
-  if (!pendingOrder) return undefined;
-
-  if (pendingOrder.state.phase === 'awaiting_selection') {
-    const count = Math.min(pendingOrder.state.productOptions?.length ?? 3, 3);
-    const optionRow = Array.from({ length: count }, (_, idx) => ({
-      text: String(idx + 1),
-      callbackData: `zepto:select:${idx + 1}`,
-    }));
-    return [optionRow, [{ text: 'Cancel', callbackData: 'zepto:cancel' }]];
-  }
-
-  if (pendingOrder.state.phase === 'awaiting_confirmation') {
-    return [
-      [
-        { text: 'Confirm COD order', callbackData: 'zepto:confirm' },
-        { text: 'Cancel', callbackData: 'zepto:cancel' },
-      ],
-    ];
-  }
-
-  return undefined;
-}
-
-async function sendAndPersist(
-  userId: string,
-  text: string,
-  options: { html?: boolean; inlineKeyboard?: TelegramInlineKeyboard } = {},
-): Promise<void> {
+async function sendAndPersist(userId: string, text: string): Promise<void> {
   const telegramId = await telegramIdForUserId(userId);
   if (!telegramId) {
     log.warn(`Cannot send — user ${userId} has no telegram_id`);
     return;
   }
-  if (options.html) {
-    await sendHtml(telegramId, text, { inlineKeyboard: options.inlineKeyboard });
-  } else {
-    await sendText(telegramId, text, { inlineKeyboard: options.inlineKeyboard });
-  }
+  await sendHtml(telegramId, text);
   try {
     await db.insert(messages).values({ userId, role: 'assistant', content: text });
   } catch (persistErr) {

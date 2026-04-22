@@ -165,16 +165,6 @@ function callbackDataToMessage(data: string): string | null {
       return '4';
     case 'onboard:skip':
       return 'skip';
-    case 'zepto:confirm':
-      return 'confirm';
-    case 'zepto:cancel':
-      return 'cancel';
-    case 'zepto:select:1':
-      return '1';
-    case 'zepto:select:2':
-      return '2';
-    case 'zepto:select:3':
-      return '3';
     default:
       return null;
   }

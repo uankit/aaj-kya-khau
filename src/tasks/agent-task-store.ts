@@ -1,3 +1,16 @@
+/**
+ * Durable state for multi-turn agent flows.
+ *
+ * Only use case today: after a successful zepto_search, stash the summarized
+ * result in agent_tasks so the LLM can see it again on the next turn when
+ * the user replies "yes" / "the second one". Without this, the search
+ * result only lives in the transient Vercel-AI-SDK tool loop and the next
+ * turn's LLM wouldn't know which product IDs to pass to add_to_cart.
+ *
+ * The LLM owns the full ordering flow — search, add-to-cart, checkout —
+ * via its registered zepto_* tools. This module is just a memory aid.
+ */
+
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { agentTasks, type AgentTask } from '../db/schema.js';
@@ -7,41 +20,14 @@ const ZEPTO_ORDER_TTL_MS = 30 * 60 * 1000;
 
 export interface ZeptoSearchState {
   kind: 'zepto_order';
-  phase:
-    | 'awaiting_selection'
-    | 'awaiting_confirmation'
-    | 'cart_staged'
-    | 'checkout_attempted';
-  searchTool?: string;
+  searchTool: string;
   searchArgs?: unknown;
-  searchResult?: string;
-  productOptions?: ZeptoProductOption[];
-  selectedProduct?: ZeptoProductOption;
-  addToCartTool?: ZeptoToolRef;
-  checkoutTool?: ZeptoToolRef;
-  addToCartArgs?: unknown;
-  cartResult?: string;
-  checkoutResult?: string;
-  lastUserMessage?: string;
-  selectedOptionNumber?: number;
-  updatedReason?: string;
+  /** Filtered top-N summary with product IDs — what the LLM saw as tool result. */
+  searchResult: string;
+  lastSearchedAt: string;
 }
 
 export type ZeptoOrderTask = AgentTask & { state: ZeptoSearchState };
-
-export interface ZeptoToolRef {
-  name: string;
-  inputSchema: Record<string, unknown>;
-}
-
-export interface ZeptoProductOption {
-  optionNumber: number;
-  title: string;
-  subtitle?: string;
-  price?: string;
-  eta?: string;
-  raw: unknown;
-}
 
 function zeptoOrderExpiresAt(): Date {
   return new Date(Date.now() + ZEPTO_ORDER_TTL_MS);
@@ -79,23 +65,16 @@ export async function saveZeptoSearchTask(args: {
   searchTool: string;
   searchArgs: unknown;
   searchResult: string;
-  productOptions?: ZeptoProductOption[];
-  addToCartTool?: ZeptoToolRef;
-  checkoutTool?: ZeptoToolRef;
 }): Promise<void> {
-  const existing = await getActiveZeptoOrderTask(args.userId);
   const state: ZeptoSearchState = {
     kind: 'zepto_order',
-    phase: 'awaiting_selection',
     searchTool: args.searchTool,
     searchArgs: args.searchArgs,
     searchResult: args.searchResult,
-    productOptions: args.productOptions ?? [],
-    addToCartTool: args.addToCartTool,
-    checkoutTool: args.checkoutTool,
-    updatedReason: 'zepto_search',
+    lastSearchedAt: new Date().toISOString(),
   };
 
+  const existing = await getActiveZeptoOrderTask(args.userId);
   if (existing) {
     await db
       .update(agentTasks)
@@ -118,41 +97,16 @@ export async function saveZeptoSearchTask(args: {
   });
 }
 
-export async function updateZeptoOrderTaskState(args: {
-  userId: string;
-  patch: Partial<ZeptoSearchState>;
-  status?: 'active' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
-}): Promise<void> {
-  const existing = await getActiveZeptoOrderTask(args.userId);
-  if (!existing) return;
-
-  await db
-    .update(agentTasks)
-    .set({
-      status: args.status ?? existing.status,
-      state: {
-        ...existing.state,
-        ...args.patch,
-      },
-      expiresAt:
-        args.status === 'completed' || args.status === 'cancelled' || args.status === 'failed'
-          ? existing.expiresAt
-          : zeptoOrderExpiresAt(),
-      updatedAt: new Date(),
-    })
-    .where(eq(agentTasks.id, existing.id));
-}
-
-export async function cancelActiveZeptoOrderTask(userId: string): Promise<boolean> {
+/**
+ * Mark the active zepto order task as completed. Called after the LLM
+ * successfully places the order so we don't inject stale search context
+ * into the next unrelated turn.
+ */
+export async function completeZeptoOrderTask(userId: string): Promise<void> {
   const existing = await getActiveZeptoOrderTask(userId);
-  if (!existing) return false;
+  if (!existing) return;
   await db
     .update(agentTasks)
-    .set({
-      status: 'cancelled',
-      state: { ...existing.state, updatedReason: 'user_cancelled' },
-      updatedAt: new Date(),
-    })
+    .set({ status: 'completed', updatedAt: new Date() })
     .where(eq(agentTasks.id, existing.id));
-  return true;
 }

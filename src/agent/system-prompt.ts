@@ -85,13 +85,17 @@ const TRACK_RULES = `TRACKING / NUTRITION RULES:
 const ORDER_RULES = `ZEPTO ORDERING RULES:
 • CRITICAL — ORDERS ARE REAL MONEY AND CANNOT BE CANCELLED. Every order is a one-way door. Err on the side of one more confirming question rather than assuming.
 • Cravings count. If the user says they're craving a specific packaged thing (Bournville, chips, Coke, ice cream, biscuits), first check CURRENT INVENTORY. If it's not there and Zepto is connected, offer to grab that specific thing from Zepto.
-• You'll see zepto_* search tools in your tool list. Use them only to search and present options. Add-to-cart and checkout are owned by the backend workflow after the user picks/confirms.
-• Flow (follow sequentially, one step per turn where possible):
-  1. zepto_search for the specific item. Accept natural-language queries.
-  2. You will receive a FILTERED top-3 result set. Present 1-3 options with <b>name</b>, pack size, <b>price</b>, and <b>ETA</b>. Keep it scannable.
-  3. Ask the user to pick an option. Do NOT call add-to-cart or checkout yourself. The backend workflow handles selection, final COD confirmation, add-to-cart, and checkout after the user taps buttons.
+• You OWN the full cart flow end-to-end via the zepto_* tools. You'll see tools for search, cart management (add/update/remove), and checkout. Read their descriptions — they're the source of truth for arg shapes.
+• Flow:
+  1. Call the Zepto search tool with a natural-language query. You'll get back a top-3 filtered JSON list of products, each with fields like id / productId / variantId / storeProductId / price / name / packSize. Remember these IDs — you'll need them for add-to-cart.
+  2. Present 1-3 options to the user in plain chat: <b>name</b>, pack size, <b>price</b>, <b>ETA</b>. Scannable. Ask which one (or "this one, confirm?" if there's just one).
+  3. WAIT for explicit user confirmation ("yes", "haan", "go ahead", "the first one", "2"). A decisive-sounding earlier message ("I want paneer") is NOT confirmation — it's a signal to search.
   4. Offer to bundle ONCE only if it feels natural: "Since I'm grabbing this, want anything else?" Don't loop.
-• If a zepto_* tool returns an error, say so plainly. Don't retry silently.`;
+  5. On confirmation: call the Zepto add-to-cart tool. Pass the required IDs from the search result. If add-to-cart requires a structured shape like <code>cartItems: [{productId, quantity}]</code>, construct it — don't pass a flat product object. Quantity defaults to 1 unless the user specified otherwise.
+  6. After add-to-cart succeeds, call the Zepto checkout tool with COD as the payment method. Do not use UPI / Card / Zepto Cash / Reserve Pay even if the schema accepts them.
+  7. After checkout, reply with plain text: order id (if returned), ETA, COD total. Remind the user to tell you when it arrives so the pantry updates.
+• If any Zepto tool returns an error, surface the error plainly to the user and STOP — don't retry silently with different args. Never place an order if add-to-cart failed.
+• Do NOT call checkout unless you've just successfully called add-to-cart in this same flow.`;
 
 const ZEPTO_NOT_CONNECTED_HINT = `ZEPTO: The user hasn't connected Zepto. If they ask to order something, mention once that they can /connect_zepto to enable ordering from chat. Then move on.`;
 
@@ -101,6 +105,13 @@ export interface BuildSystemPromptOptions {
   intent?: Intent;
   /** True if this user has a live Zepto account. Controls ordering hint text. */
   zeptoConnected?: boolean;
+  /**
+   * Trimmed search-result summary from a recent zepto_search call (fetched
+   * from agent_tasks). Injected into the ORDER prompt so the LLM remembers
+   * product IDs across turns even though tool_results don't persist in the
+   * message history.
+   */
+  activeOrderContext?: string;
 }
 
 /**
@@ -217,6 +228,15 @@ export function buildSystemPrompt(
       : `INVENTORY: ${inventoryBlock}`,
   );
   if (mealsBlock) contextParts.push(`RECENT MEALS (last 3 days):\n${mealsBlock}`);
+
+  // Carry product IDs from the last zepto_search into this turn so the
+  // LLM can call add-to-cart with correct args even though tool_results
+  // aren't persisted in message history.
+  if (intent === 'order' && options.activeOrderContext) {
+    contextParts.push(
+      `RECENT ZEPTO SEARCH (from your previous turn — use these IDs, do NOT re-search unless the user asked for something different):\n${options.activeOrderContext}`,
+    );
+  }
 
   const triggerBlock = formatTrigger(trigger);
 
