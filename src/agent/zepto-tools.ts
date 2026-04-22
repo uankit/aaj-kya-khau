@@ -171,9 +171,20 @@ export async function buildZeptoTools(userId: string): Promise<Record<string, To
             error: 'Zepto account not connected or token expired — user must /connect_zepto again.',
           };
         }
+        const argsPreview = JSON.stringify(args).slice(0, 800);
+        log.info(`zepto_${mt.name} call`, { userId, args: argsPreview });
         try {
           const result = await callZeptoTool(userToken, mt.name, args);
           const summary = summarizeResult(mt.name, result);
+
+          // Log the response so we can see when Zepto returns success-but-prose-error
+          // payloads (e.g. "product_id unavailable") that our code can't detect
+          // from isError alone.
+          log.info(`zepto_${mt.name} result`, {
+            userId,
+            isError: !!result.isError,
+            responsePreview: summary.slice(0, 800),
+          });
 
           if (result.isError) {
             return { error: summary };
