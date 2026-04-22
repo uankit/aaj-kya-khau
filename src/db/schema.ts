@@ -240,6 +240,39 @@ export const messagesRelations = relations(messages, ({ one }) => ({
 }));
 
 /* ------------------------------------------------------------------ */
+/* agent_tasks                                                        */
+/*                                                                    */
+/* Durable working memory for agentic workflows that span turns.      */
+/* Example: Zepto order search → user picks/confirms → checkout.       */
+/* Chat history is still useful for tone, but workflow state lives     */
+/* here so short replies like "yes" can resume the right task.         */
+/* ------------------------------------------------------------------ */
+
+export const agentTasks = pgTable(
+  'agent_tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    type: varchar('type', { length: 50 }).notNull(),
+    status: varchar('status', { length: 40 }).notNull().default('active'),
+    state: jsonb('state').notNull().default({}),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userStatusIdx: index('agent_tasks_user_status_idx').on(table.userId, table.status),
+    expiresAtIdx: index('agent_tasks_expires_at_idx').on(table.expiresAt),
+  }),
+);
+
+export const agentTasksRelations = relations(agentTasks, ({ one }) => ({
+  user: one(users, { fields: [agentTasks.userId], references: [users.id] }),
+}));
+
+/* ------------------------------------------------------------------ */
 /* nutrition_foods (IFCT 2017 food composition database)              */
 /* ------------------------------------------------------------------ */
 
@@ -340,6 +373,9 @@ export type NewMealLog = typeof mealLogs.$inferInsert;
 
 export type Message = typeof messages.$inferSelect;
 export type NewMessage = typeof messages.$inferInsert;
+
+export type AgentTask = typeof agentTasks.$inferSelect;
+export type NewAgentTask = typeof agentTasks.$inferInsert;
 
 /* ------------------------------------------------------------------ */
 /* connected_accounts — OAuth-linked external grocery accounts        */

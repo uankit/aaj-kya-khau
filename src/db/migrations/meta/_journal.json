@@ -57,6 +57,13 @@
       "when": 1776868523134,
       "tag": "0007_steady_smasher",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776870000000,
+      "tag": "0008_add-agent-tasks",
+      "breakpoints": true
     }
   ]
 }

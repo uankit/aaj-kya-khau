@@ -13,7 +13,7 @@ import { webhookCallback } from 'grammy';
 import { env } from '../config/env.js';
 import { db } from '../config/database.js';
 import { webhookDedup } from '../db/schema.js';
-import { bot, parseIncoming, sendText } from '../services/telegram.js';
+import { bot, parseIncoming, sendText, type IncomingMessage } from '../services/telegram.js';
 import { getOrCreateUserByTelegramId } from '../services/user.js';
 import { handleOnboardingMessage, sendCurrentPrompt } from '../onboarding/flow.js';
 import { handleTurn } from '../agent/agent.js';
@@ -96,12 +96,91 @@ function registerBotHandlers(): void {
     }
   });
 
+  bot.on('callback_query:data', async (ctx) => {
+    const data = ctx.callbackQuery.data;
+    const from = ctx.callbackQuery.from;
+    const telegramId = from.id.toString();
+    const updateId = ctx.update.update_id.toString();
+
+    let claimed: boolean;
+    try {
+      claimed = await claimUpdate(updateId);
+    } catch (err) {
+      log.error('Callback dedup claim failed; proceeding without dedup', err);
+      claimed = true;
+    }
+    if (!claimed) {
+      await ctx.answerCallbackQuery().catch(() => {});
+      return;
+    }
+
+    cleanupOldDedupRows().catch(() => {});
+
+    try {
+      const body = callbackDataToMessage(data);
+      if (!body) {
+        await ctx.answerCallbackQuery({ text: 'That action expired. Send me a message again?' });
+        return;
+      }
+
+      await ctx.answerCallbackQuery();
+      await processMessage({
+        telegramId,
+        chatId: ctx.callbackQuery.message?.chat.id ?? from.id,
+        username: from.username,
+        displayName: [from.first_name, from.last_name].filter(Boolean).join(' ').trim() || undefined,
+        body,
+        updateId,
+        mediaItems: [],
+      });
+    } catch (err) {
+      log.error(`Unhandled callback error from ${telegramId}`, err);
+      await ctx.answerCallbackQuery({ text: 'Something went wrong. Try again?' }).catch(() => {});
+      await sendText(telegramId, 'Sorry, something went wrong on my end. Please try again in a minute!');
+    }
+  });
+
   // Anything else (stickers, locations, voice notes we don't yet parse) → ignore
 }
 
-async function processMessage(
-  incoming: ReturnType<typeof parseIncoming> & object,
-): Promise<void> {
+function callbackDataToMessage(data: string): string | null {
+  switch (data) {
+    case 'cmd:hungry':
+      return "I'm hungry";
+    case 'cmd:kitchen':
+      return '/kitchen';
+    case 'cmd:today':
+      return '/today';
+    case 'cmd:schedule':
+      return '/schedule';
+    case 'cmd:connect_zepto':
+      return '/connect_zepto';
+    case 'onboard:diet:1':
+      return '1';
+    case 'onboard:diet:2':
+      return '2';
+    case 'onboard:diet:3':
+      return '3';
+    case 'onboard:diet:4':
+      return '4';
+    case 'onboard:skip':
+      return 'skip';
+    case 'zepto:confirm':
+      return 'confirm';
+    case 'zepto:cancel':
+      return 'cancel';
+    case 'zepto:select:1':
+      return '1';
+    case 'zepto:select:2':
+      return '2';
+    case 'zepto:select:3':
+      return '3';
+    default:
+      return null;
+  }
+}
+
+async function processMessage(incoming: IncomingMessage): Promise<void> {
   const { user, created } = await getOrCreateUserByTelegramId(incoming.telegramId);
 
   // Short-circuit specific slash commands (/start, /help, /mute, /feedback).

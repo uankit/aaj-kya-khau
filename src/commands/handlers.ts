@@ -19,9 +19,9 @@ import {
   userSchedules,
   type User,
 } from '../db/schema.js';
-import { sendText } from '../services/telegram.js';
-import { unregisterMealCron, registerMealCron } from '../services/scheduler.js';
-import { unregisterNightlyCron, registerNightlyCron } from '../services/nightly.js';
+import { sendHtml, type TelegramInlineKeyboard } from '../services/telegram.js';
+import { unregisterMealCron } from '../services/scheduler.js';
+import { unregisterNightlyCron } from '../services/nightly.js';
 import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
@@ -32,38 +32,52 @@ import {
 import { encrypt } from '../utils/crypto.js';
 import { env } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
+import { escapeHtml } from '../utils/html.js';
+import { sendCurrentPrompt } from '../onboarding/flow.js';
 
 const log = createLogger('commands');
 
 /** Bot capability overview shown on /help */
-const HELP_TEXT = `Here's what I can do 🤌
+const HELP_TEXT = `<b>Here's what I can do</b> 🤌
 
-📄 Send me a grocery bill PDF — I'll auto-build your kitchen inventory
+📄 Send me a grocery bill PDF — I'll auto-build your kitchen inventory.
 
-🍽️ Say "I'm hungry" or /hungry — meal suggestion from what you have
-📊 /kitchen — everything currently in your kitchen
-📝 "ate poha" or /ate poha — log what you just had
-📈 /today — today's nutrition summary (after /profile setup)
-⏰ /schedule — view or change meal reminder times
-👤 /profile — set up nutrition tracking (age, weight, goals)
-🛒 /connect_zepto — link Zepto to auto-sync your pantry
-🔇 /mute — pause all reminders
-💬 /feedback — tell me what's broken or missing
+🍽️ <b>I'm hungry</b> — meals from what you have
+📊 <b>/kitchen</b> — current pantry
+📝 <b>ate poha</b> — log a meal
+📈 <b>/today</b> — nutrition summary
+⏰ <b>/schedule</b> — reminder times
+👤 <b>/profile</b> — nutrition setup
+🛒 <b>/connect_zepto</b> — order cravings or missing items
+🔇 <b>/mute</b> — pause reminders
+💬 <b>/feedback</b> — tell me what's broken
 
-Just talk to me naturally. I'll figure it out 🎯`;
+Just talk naturally. I'll figure it out 🎯`;
+
+const MAIN_MENU_KEYBOARD: TelegramInlineKeyboard = [
+  [
+    { text: 'Suggest a meal', callbackData: 'cmd:hungry' },
+    { text: 'Show kitchen', callbackData: 'cmd:kitchen' },
+  ],
+  [
+    { text: 'Today summary', callbackData: 'cmd:today' },
+    { text: 'Schedule', callbackData: 'cmd:schedule' },
+  ],
+  [{ text: 'Connect Zepto', callbackData: 'cmd:connect_zepto' }],
+];
 
 /** Menu shown to returning onboarded users who send /start */
 function welcomeBackText(name: string | null): string {
-  const n = name ?? 'there';
-  return `Welcome back, ${n}! 👋
+  const n = escapeHtml(name ?? 'there');
+  return `Welcome back, <b>${n}</b>! 👋
 
-What are we doing today?
+<b>What are we doing today?</b>
 
-🍽️ /hungry — suggest me a meal
-📊 /kitchen — what do I have?
-📈 /today — my nutrition today
-⏰ /schedule — change my reminder times
-❓ /help — all commands`;
+🍽️ Meal idea from your kitchen
+📊 Pantry check
+📈 Nutrition summary
+⏰ Reminder settings
+🛒 Zepto for cravings or missing items`;
 }
 
 export interface CommandContext {
@@ -112,23 +126,21 @@ async function handleStart(ctx: CommandContext): Promise<boolean> {
   if (created) return false;
 
   // Mid-onboarding — fall through, handleOnboardingMessage will resend
-  // the current step's prompt (we treat /start as "no-op, show me where I am")
   if (!user.onboardingComplete) {
-    // Special case: typing /start while mid-onboarding is confusing. Just
-    // re-send the current question so the user isn't stuck.
-    // We do this by falling through — the onboarding flow's validation will
-    // mark /start as invalid input and re-send the current question.
-    return false;
+    await sendCurrentPrompt(user);
+    return true;
   }
 
   // Returning onboarded user — show friendly welcome-back menu
-  await sendText(user.telegramId, welcomeBackText(user.name));
+  await sendHtml(user.telegramId, welcomeBackText(user.name), {
+    inlineKeyboard: MAIN_MENU_KEYBOARD,
+  });
   log.info(`/start returning user ${user.telegramId}`);
   return true;
 }
 
 async function handleHelp(ctx: CommandContext): Promise<boolean> {
-  await sendText(ctx.user.telegramId, HELP_TEXT);
+  await sendHtml(ctx.user.telegramId, HELP_TEXT, { inlineKeyboard: MAIN_MENU_KEYBOARD });
   log.info(`/help sent to ${ctx.user.telegramId}`);
   return true;
 }
@@ -154,11 +166,11 @@ async function handleMute(ctx: CommandContext): Promise<boolean> {
   }
   unregisterNightlyCron(user.id);
 
-  await sendText(
+  await sendHtml(
     user.telegramId,
-    `🤫 All reminders paused.
+    `🤫 <b>All reminders paused.</b>
 
-Just say something like "remind me for breakfast at 9" or use /schedule to turn them back on whenever.`,
+Just say something like <code>remind me for breakfast at 9</code> or use <b>/schedule</b> to turn them back on whenever.`,
   );
   log.info(`/mute: ${user.telegramId} paused ${schedules.length} schedules`);
   return true;
@@ -168,9 +180,9 @@ async function handleConnectZepto(ctx: CommandContext): Promise<boolean> {
   const { user } = ctx;
 
   if (!env.ZEPTO_CLIENT_ID || !env.ENCRYPTION_KEY) {
-    await sendText(
+    await sendHtml(
       user.telegramId,
-      `Zepto connection isn't configured on the server yet. Hang tight — coming soon! 🛒`,
+      `Zepto connection isn't configured on the server yet. Hang tight 🛒`,
     );
     log.warn(`/connect_zepto requested by ${user.telegramId} but env not fully configured`);
     return true;
@@ -206,17 +218,17 @@ async function handleConnectZepto(ctx: CommandContext): Promise<boolean> {
     codeChallenge,
   });
 
-  await sendText(
+  await sendHtml(
     user.telegramId,
-    `Let's link your Zepto account 🛒
+    `<b>Let's link your Zepto account</b> 🛒
 
-1️⃣ Tap this link to approve:
-${authUrl}
+1. Tap this link to approve:
+${escapeHtml(authUrl)}
 
-2️⃣ You'll land on a page that shows an "authorization code" — copy it.
+2. You'll land on a page that shows an <b>authorization code</b> — copy it.
 
-3️⃣ Come back here and send it like this:
-/zepto_code PASTE_THE_CODE_HERE
+3. Come back here and send:
+<code>/zepto_code PASTE_THE_CODE_HERE</code>
 
 (The link stays valid for 10 minutes.)`,
   );
@@ -231,15 +243,15 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
   const parts = rawText.trim().split(/\s+/);
   const code = parts[1];
   if (!code) {
-    await sendText(
+    await sendHtml(
       user.telegramId,
-      `Send the code like this:\n\n/zepto_code YOUR_CODE_HERE`,
+      `Send the code like this:\n\n<code>/zepto_code YOUR_CODE_HERE</code>`,
     );
     return true;
   }
 
   if (!env.ZEPTO_CLIENT_ID || !env.ENCRYPTION_KEY) {
-    await sendText(
+    await sendHtml(
       user.telegramId,
       `Zepto isn't configured on the server yet. Sorry! 😬`,
     );
@@ -260,9 +272,9 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
     .limit(1);
 
   if (!pending) {
-    await sendText(
+    await sendHtml(
       user.telegramId,
-      `I don't see an active Zepto connection in progress. Start one with /connect_zepto 🛒`,
+      `I don't see an active Zepto connection in progress. Start one with <b>/connect_zepto</b> 🛒`,
     );
     return true;
   }
@@ -272,9 +284,9 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
     await db
       .delete(oauthPendingStates)
       .where(eq(oauthPendingStates.state, pending.state));
-    await sendText(
+    await sendHtml(
       user.telegramId,
-      `That code's link has expired. Kick it off again with /connect_zepto 🕙`,
+      `That code's link has expired. Kick it off again with <b>/connect_zepto</b> 🕙`,
     );
     return true;
   }
@@ -290,7 +302,7 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
     });
   } catch (err) {
     log.error(`Token exchange failed for user ${user.id}`, err);
-    await sendText(
+    await sendHtml(
       user.telegramId,
       `Couldn't verify that code with Zepto. Either it's already been used or it's mistyped — try /connect_zepto again.`,
     );
@@ -331,13 +343,17 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
     .delete(oauthPendingStates)
     .where(eq(oauthPendingStates.state, pending.state));
 
-  await sendText(
+  await sendHtml(
     user.telegramId,
-    `✅ Zepto connected!
+    `✅ <b>Zepto connected!</b>
 
-Next time you say something like "I feel like making paneer butter masala", I can check your pantry AND offer to grab anything that's missing — straight from here 🛒
+Now you can say things like:
+• <code>I'm craving Bournville</code>
+• <code>make paneer butter masala</code>
+• <code>order chips</code>
 
-(Want richer UX? That's coming — tap-to-confirm orders with thumbnails and all. For now: chat-first.)`,
+I'll check your pantry first, then guide the Zepto order with buttons when something's missing 🛒`,
+    { inlineKeyboard: MAIN_MENU_KEYBOARD },
   );
 
   log.info(`Zepto connected (OOB) for user ${user.id}`);
@@ -345,38 +361,12 @@ Next time you say something like "I feel like making paneer butter masala", I ca
 }
 
 async function handleFeedback(ctx: CommandContext): Promise<boolean> {
-  await sendText(
+  await sendHtml(
     ctx.user.telegramId,
-    `Tell me what's on your mind 💭
+    `<b>Tell me what's on your mind</b> 💭
 
 Anything — features you want, things that broke, random thoughts. I'm listening.`,
   );
   log.info(`/feedback prompt sent to ${ctx.user.telegramId}`);
   return true;
-}
-
-/**
- * Re-enable a user's schedules after /mute. Exposed for future use — we don't
- * currently have a /resume command but the scheduler needs the ability to
- * re-register crons from the DB.
- */
-export async function reenableUserSchedules(user: User): Promise<void> {
-  const schedules = await db
-    .select()
-    .from(userSchedules)
-    .where(and(eq(userSchedules.userId, user.id), eq(userSchedules.enabled, true)));
-
-  for (const s of schedules) {
-    registerMealCron({
-      userId: user.id,
-      mealType: s.mealType,
-      remindAt: s.remindAt,
-      timezone: user.timezone,
-    });
-  }
-  registerNightlyCron({
-    userId: user.id,
-    nightlyAt: user.nightlySummaryAt,
-    timezone: user.timezone,
-  });
 }

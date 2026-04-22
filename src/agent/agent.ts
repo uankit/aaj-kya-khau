@@ -19,7 +19,7 @@ import { generateText, type CoreMessage } from 'ai';
 import { db } from '../config/database.js';
 import { messages } from '../db/schema.js';
 import { model } from '../llm/client.js';
-import { sendText } from '../services/telegram.js';
+import { sendHtml, sendText, type TelegramInlineKeyboard } from '../services/telegram.js';
 import { parseAndSaveInvoice } from '../services/invoice.js';
 import { hasZeptoConnected } from '../services/mcp/zepto-account.js';
 import { loadContext } from './context.js';
@@ -27,13 +27,25 @@ import { buildSystemPrompt, type TurnTrigger } from './system-prompt.js';
 import { buildTools } from './tools.js';
 import { classifyIntent, type Intent } from './intent.js';
 import { createLogger } from '../utils/logger.js';
+import {
+  cancelActiveZeptoOrderTask,
+  getActiveZeptoOrderTask,
+  updateZeptoOrderTaskState,
+  type ZeptoOrderTask,
+} from '../tasks/agent-task-store.js';
+import { parseZeptoOrderReply, type ZeptoOrderReply } from '../tasks/zepto-order/confirmations.js';
 
 const log = createLogger('agent');
 
-// Lowered from 5 → 3. Most ordering turns only need: preferences → search →
-// present options (1 turn), then confirm → add_to_cart → checkout (next turn).
-// Higher ceilings just inflate token usage via re-sent tool results.
-const MAX_TOOL_STEPS = 3;
+// Bumped back up from 3 → 5 after observing empty-response failures on
+// checkout turns (add_to_cart → checkout → text = 3 steps with zero margin;
+// if the LLM re-searched to resolve an ambiguous product, step 3 became
+// another tool call and no final text was generated).
+//
+// Token cost is bounded now by per-tool-result filtering in zepto-tools.ts
+// (search results trimmed to top-3, non-search results capped at 1500 chars),
+// so raising the ceiling is safe from a cost perspective.
+const MAX_TOOL_STEPS = 5;
 // LLM hard ceiling. GPT-4o usually answers in <5s; anything over 30s is hung.
 // Hitting this limit aborts the request at the HTTP client level and we fall
 // back to a friendly error reply rather than letting the user hang forever.
@@ -90,13 +102,45 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
     // ── 3. Load context fresh (inventory will already reflect the PDF) ────
     const ctx = await loadContext(userId);
 
+    const activeZeptoOrder =
+      trigger.type === 'message' ? await getActiveZeptoOrderTask(userId) : null;
+    const activeZeptoReply =
+      trigger.type === 'message' && activeZeptoOrder
+        ? parseZeptoOrderReply(trigger.text)
+        : null;
+
+    if (activeZeptoReply?.kind === 'cancel') {
+      await cancelActiveZeptoOrderTask(userId);
+      await sendAndPersist(userId, 'Cancelled the Zepto order flow. No order placed 👍');
+      return;
+    }
+
     // ── 3a. Classify intent for message turns ────────────────────────────
     // Drives which tools are loaded and which system prompt sections fire.
     // Non-message triggers (nudges/nightly) don't need classification — they
     // have their own fixed prompt path.
     let intent: Intent | undefined;
     if (trigger.type === 'message') {
-      intent = await classifyIntent(trigger.text, ctx.history);
+      if (
+        activeZeptoOrder &&
+        (activeZeptoReply?.kind === 'confirm' || activeZeptoReply?.kind === 'select')
+      ) {
+        intent = 'order';
+        await updateZeptoOrderTaskState({
+          userId,
+          patch: {
+            lastUserMessage: trigger.text,
+            selectedOptionNumber:
+              activeZeptoReply.kind === 'select'
+                ? activeZeptoReply.selectionNumber
+                : activeZeptoOrder.state.selectedOptionNumber,
+            updatedReason: activeZeptoReply.kind,
+          },
+          status: 'active',
+        });
+      } else {
+        intent = await classifyIntent(trigger.text, ctx.history);
+      }
       log.info(`turn intent=${intent} user=${userId}`);
     }
 
@@ -150,6 +194,21 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
       ];
     }
 
+    if (
+      trigger.type === 'message' &&
+      activeZeptoOrder &&
+      activeZeptoReply &&
+      activeZeptoReply.kind !== 'other'
+    ) {
+      finalMessages = [
+        ...finalMessages,
+        {
+          role: 'system',
+          content: formatActiveZeptoOrderNote(activeZeptoOrder, activeZeptoReply),
+        },
+      ];
+    }
+
     // Safety: if history is empty AND this is a normal message turn with no
     // prior history, make sure we at least pass the current user message.
     if (
@@ -185,7 +244,8 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
     }
 
     // ── 6 + 7. Persist + send ─────────────────────────────────────────────
-    await sendAndPersist(userId, replyText);
+    const replyKeyboard = await buildReplyKeyboard(userId);
+    await sendAndPersist(userId, replyText, { html: true, inlineKeyboard: replyKeyboard });
     log.debug(`Agent turn complete for ${userId}`, {
       toolCalls: result.toolCalls?.length ?? 0,
       steps: result.steps?.length ?? 0,
@@ -215,6 +275,28 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
   }
 }
 
+function formatActiveZeptoOrderNote(task: ZeptoOrderTask, reply: ZeptoOrderReply): string {
+  const selectedOption =
+    reply.kind === 'select'
+      ? reply.selectionNumber
+      : task.state.selectedOptionNumber;
+  const selection =
+    selectedOption
+      ? `The selected option is ${selectedOption}.`
+      : reply.kind === 'confirm'
+        ? 'The user explicitly confirmed they want to proceed.'
+        : `The user reply kind is ${reply.kind}.`;
+
+  return `ACTIVE ZEPTO ORDER TASK:
+You are resuming a pending Zepto order workflow, not starting fresh. ${selection}
+Use the previous Zepto search result below as the source of truth. If the user selected a numbered option, show that selected item + price and ask for final COD confirmation. If the user explicitly confirmed after an item was shown, continue with zepto_add_to_cart and then zepto_checkout. Do not re-search unless the user asked for a different item. If the result lacks a usable identifier, ask the user to pick/search again instead of falling back.
+
+Previous search tool: ${task.state.searchTool ?? '(unknown)'}
+Previous search args: ${JSON.stringify(task.state.searchArgs ?? {})}
+Previous search result:
+${task.state.searchResult ?? '(missing)'}`;
+}
+
 /**
  * Send a message AND persist it to history.
  *
@@ -224,13 +306,40 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
  * the user already got their reply and retrying would double-send. The
  * history will have a one-turn gap which is much better than a double text.
  */
-async function sendAndPersist(userId: string, text: string): Promise<void> {
+async function buildReplyKeyboard(userId: string): Promise<TelegramInlineKeyboard | undefined> {
+  const pendingOrder = await getActiveZeptoOrderTask(userId);
+  if (!pendingOrder || pendingOrder.state.phase !== 'awaiting_selection_or_confirmation') {
+    return undefined;
+  }
+
+  return [
+    [
+      { text: '1', callbackData: 'zepto:select:1' },
+      { text: '2', callbackData: 'zepto:select:2' },
+      { text: '3', callbackData: 'zepto:select:3' },
+    ],
+    [
+      { text: 'Confirm COD order', callbackData: 'zepto:confirm' },
+      { text: 'Cancel', callbackData: 'zepto:cancel' },
+    ],
+  ];
+}
+
+async function sendAndPersist(
+  userId: string,
+  text: string,
+  options: { html?: boolean; inlineKeyboard?: TelegramInlineKeyboard } = {},
+): Promise<void> {
   const telegramId = await telegramIdForUserId(userId);
   if (!telegramId) {
     log.warn(`Cannot send — user ${userId} has no telegram_id`);
     return;
   }
-  await sendText(telegramId, text);
+  if (options.html) {
+    await sendHtml(telegramId, text, { inlineKeyboard: options.inlineKeyboard });
+  } else {
+    await sendText(telegramId, text, { inlineKeyboard: options.inlineKeyboard });
+  }
   try {
     await db.insert(messages).values({ userId, role: 'assistant', content: text });
   } catch (persistErr) {

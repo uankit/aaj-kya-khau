@@ -14,7 +14,7 @@
 import { eq, and, isNull, or, ne } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { users, userSchedules, messages, defaultPantryItems, type User } from '../db/schema.js';
-import { sendText } from '../services/telegram.js';
+import { sendHtml, type TelegramInlineKeyboard } from '../services/telegram.js';
 import { registerMealCron } from '../services/scheduler.js';
 import { registerNightlyCron } from '../services/nightly.js';
 import { addItemsBulk } from '../services/inventory.js';
@@ -41,8 +41,45 @@ async function persistMessage(
 }
 
 /** Sends a message and persists it as the assistant message. */
-async function sendAndPersist(user: User, text: string) {
-  await sendText(user.telegramId, text);
+function keyboardForStep(step: OnboardingStep): TelegramInlineKeyboard | undefined {
+  if (step === 'ask_diet') {
+    return [
+      [
+        { text: '🥦 Veg', callbackData: 'onboard:diet:1' },
+        { text: '🍗 Non-veg', callbackData: 'onboard:diet:2' },
+      ],
+      [
+        { text: '🥚 Egg', callbackData: 'onboard:diet:3' },
+        { text: '🌱 Vegan', callbackData: 'onboard:diet:4' },
+      ],
+    ];
+  }
+
+  if (
+    step === 'ask_breakfast_time' ||
+    step === 'ask_lunch_time' ||
+    step === 'ask_snack_time' ||
+    step === 'ask_dinner_time'
+  ) {
+    return [[{ text: 'Skip this reminder', callbackData: 'onboard:skip' }]];
+  }
+
+  if (step === 'complete') {
+    return [
+      [
+        { text: 'Suggest a meal', callbackData: 'cmd:hungry' },
+        { text: 'Show kitchen', callbackData: 'cmd:kitchen' },
+      ],
+      [{ text: 'Connect Zepto', callbackData: 'cmd:connect_zepto' }],
+    ];
+  }
+
+  return undefined;
+}
+
+/** Sends a message and persists it as the assistant message. */
+async function sendAndPersist(user: User, text: string, step: OnboardingStep = user.onboardingStep) {
+  await sendHtml(user.telegramId, text, { inlineKeyboard: keyboardForStep(step) });
   await persistMessage(user.id, 'assistant', text);
 }
 
@@ -52,7 +89,7 @@ async function sendAndPersist(user: User, text: string) {
  */
 export async function sendCurrentPrompt(user: User) {
   const prompt = ONBOARDING_PROMPTS[user.onboardingStep](user.name ?? undefined);
-  await sendAndPersist(user, prompt);
+  await sendAndPersist(user, prompt, user.onboardingStep);
 }
 
 /**
@@ -77,7 +114,11 @@ export async function handleOnboardingMessage(user: User, text: string): Promise
         name: result.value,
         onboardingStep: nextStep(step),
       });
-      await sendAndPersist(updated, ONBOARDING_PROMPTS.ask_diet(updated.name ?? undefined));
+      await sendAndPersist(
+        updated,
+        ONBOARDING_PROMPTS.ask_diet(updated.name ?? undefined),
+        'ask_diet',
+      );
       return false;
     }
 
@@ -94,6 +135,7 @@ export async function handleOnboardingMessage(user: User, text: string): Promise
       await sendAndPersist(
         updated,
         ONBOARDING_PROMPTS.ask_breakfast_time(updated.name ?? undefined),
+        'ask_breakfast_time',
       );
       return false;
     }
@@ -131,13 +173,14 @@ export async function handleOnboardingMessage(user: User, text: string): Promise
         await sendAndPersist(
           updated,
           ONBOARDING_PROMPTS.complete(updated.name ?? undefined),
+          'complete',
         );
         log.info(`Onboarding complete for ${updated.telegramId}`);
         return true;
       }
 
       const updated = await advanceUser(user, { onboardingStep: next });
-      await sendAndPersist(updated, ONBOARDING_PROMPTS[next](updated.name ?? undefined));
+      await sendAndPersist(updated, ONBOARDING_PROMPTS[next](updated.name ?? undefined), next);
       return false;
     }
 

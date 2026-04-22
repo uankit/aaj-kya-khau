@@ -41,11 +41,11 @@ const CLASSIFY_TIMEOUT_MS = 8_000;
 
 const CLASSIFY_SYSTEM = `You classify one message from a user to their food / kitchen assistant bot. Pick exactly ONE intent:
 
-- order: user wants to buy / order groceries or ingredients from Zepto. Also classify as "order" if the user is confirming a previous Zepto ordering proposal with yes/confirm/go ahead/haan/chalo.
-- cook: user wants a meal suggestion, asks what to eat / cook / make, says they're hungry, asks about recipes.
-- pantry: user is managing their kitchen inventory — adding items, marking things finished, asking what they have.
-- track: nutrition, calories, protein, macros, weight. Also when user is logging a meal they just ate.
-- config: user is changing settings — meal reminder times, diet type (going vegan etc.), nightly summary time, muting reminders.
+- order: user wants to buy / order groceries or ingredients from Zepto, OR is craving / wants a specific store-bought grocery/snack/drink/sweet that may need Zepto (e.g. "I'm craving Bournville", "want chips", "get me coke"). Also classify as "order" if the user is confirming a previous Zepto ordering proposal with yes/confirm/go ahead/haan/chalo.
+- cook: user wants a meal suggestion, asks what to eat / cook / make, says they're hungry, asks about recipes. Slash shortcut: /hungry.
+- pantry: user is managing their kitchen inventory — adding items, marking things finished, asking what they have. Slash shortcut: /kitchen.
+- track: nutrition, calories, protein, macros, weight. Also when user is logging a meal they just ate. Slash shortcuts: /ate, /today, /profile.
+- config: user is changing settings — meal reminder times, diet type (going vegan etc.), nightly summary time, muting reminders. Slash shortcut: /schedule.
 - chitchat: greetings, thanks, random remarks, clarifications. Anything that doesn't fit the others.
 
 Use the RECENT CONVERSATION to disambiguate short replies ("yes", "haan", "go ahead"). If the assistant was just proposing an order, "yes" → order. If the assistant was just suggesting a meal, "yes" → cook.

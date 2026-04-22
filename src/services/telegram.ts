@@ -21,6 +21,17 @@ const SEND_TIMEOUT_MS = 15_000;
 const SEND_RETRY_ATTEMPTS = 3;
 const FILE_DOWNLOAD_TIMEOUT_MS = 15_000;
 
+export interface TelegramInlineButton {
+  text: string;
+  callbackData: string;
+}
+
+export type TelegramInlineKeyboard = TelegramInlineButton[][];
+
+export interface SendMessageOptions {
+  inlineKeyboard?: TelegramInlineKeyboard;
+}
+
 /**
  * The singleton bot. grammy's Bot class holds a Telegram API client under
  * the hood and optionally runs handlers. We use it in webhook mode —
@@ -104,7 +115,36 @@ export function parseIncoming(ctx: Context): IncomingMessage | null {
  *
  * Retries up to 3 times with exponential backoff on transient failures.
  */
-export async function sendText(toTelegramId: string, text: string): Promise<void> {
+function replyMarkup(options?: SendMessageOptions) {
+  if (!options?.inlineKeyboard) return undefined;
+  return {
+    inline_keyboard: options.inlineKeyboard.map((row) =>
+      row.map((button) => ({
+        text: button.text,
+        callback_data: button.callbackData,
+      })),
+    ),
+  };
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+export async function sendText(
+  toTelegramId: string,
+  text: string,
+  options?: SendMessageOptions,
+): Promise<void> {
   log.info(`→ sending to ${toTelegramId}`, { chars: text.length });
   const startedAt = Date.now();
 
@@ -112,7 +152,9 @@ export async function sendText(toTelegramId: string, text: string): Promise<void
     await retryWithBackoff(
       async () => {
         const msg = await withTimeout(
-          bot.api.sendMessage(toTelegramId, text),
+          bot.api.sendMessage(toTelegramId, text, {
+            reply_markup: replyMarkup(options),
+          }),
           SEND_TIMEOUT_MS,
           `Telegram send to ${toTelegramId}`,
         );
@@ -127,6 +169,40 @@ export async function sendText(toTelegramId: string, text: string): Promise<void
   } catch (err) {
     log.error(`✗ failed to send to ${toTelegramId} after ${Date.now() - startedAt}ms`, err);
     throw err;
+  }
+}
+
+export async function sendHtml(
+  toTelegramId: string,
+  html: string,
+  options?: SendMessageOptions,
+): Promise<void> {
+  log.info(`→ sending HTML to ${toTelegramId}`, { chars: html.length });
+  const startedAt = Date.now();
+
+  try {
+    await retryWithBackoff(
+      async () => {
+        const msg = await withTimeout(
+          bot.api.sendMessage(toTelegramId, html, {
+            parse_mode: 'HTML',
+            link_preview_options: { is_disabled: true },
+            reply_markup: replyMarkup(options),
+          }),
+          SEND_TIMEOUT_MS,
+          `Telegram HTML send to ${toTelegramId}`,
+        );
+        log.info(`✓ sent HTML to ${toTelegramId}`, {
+          messageId: msg.message_id,
+          elapsedMs: Date.now() - startedAt,
+        });
+      },
+      SEND_RETRY_ATTEMPTS,
+      `Telegram HTML send to ${toTelegramId}`,
+    );
+  } catch (err) {
+    log.warn(`HTML send failed for ${toTelegramId}; falling back to plain text`, err);
+    await sendText(toTelegramId, stripHtml(html), options);
   }
 }
 

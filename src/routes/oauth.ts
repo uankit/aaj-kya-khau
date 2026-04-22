@@ -27,7 +27,7 @@ import {
   users,
 } from '../db/schema.js';
 import { encrypt } from '../utils/crypto.js';
-import { sendText } from '../services/telegram.js';
+import { sendHtml } from '../services/telegram.js';
 import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
@@ -227,9 +227,9 @@ export async function oauthRoutes(app: FastifyInstance) {
       // Confirm via the bot (don't let a failed DM block the browser redirect)
       const [user] = await db.select().from(users).where(eq(users.id, pending.userId)).limit(1);
       if (user) {
-        sendText(
+        sendHtml(
           user.telegramId,
-          `✅ Zepto connected! From now on I can help you order missing ingredients straight from chat.\n\nTry me: "I feel like making pasta tonight" 🍝`,
+          `✅ <b>Zepto connected!</b>\n\nNow I can help with cravings and missing ingredients straight from chat.\n\nTry: <code>I'm craving Bournville</code>`,
         ).catch((err) => log.warn(`Post-connect DM failed for ${user.telegramId}`, err));
       }
 

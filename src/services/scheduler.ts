@@ -10,8 +10,8 @@
  * The fires-at-boot / destroys-on-update model is a bit manual, but it's
  * dead simple to reason about and scales to thousands of users without Redis.
  *
- * When a cron fires, it calls `triggerNudge()` which (for now) just logs.
- * Phase 3 will replace this with a call into the agent loop.
+ * When a cron fires, it calls `triggerNudge()`, which dispatches into the
+ * agent loop after checking whether that meal was already logged today.
  */
 
 import cron, { type ScheduledTask } from 'node-cron';

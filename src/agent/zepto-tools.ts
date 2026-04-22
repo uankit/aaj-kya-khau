@@ -25,6 +25,10 @@ import {
   type McpTool,
   type McpToolResult,
 } from '../services/mcp/zepto-client.js';
+import {
+  saveZeptoSearchTask,
+  updateZeptoOrderTaskState,
+} from '../tasks/agent-task-store.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('zepto-tools');
@@ -152,6 +156,18 @@ function summarizeResult(toolName: string, r: McpToolResult): string {
     : flattened;
 }
 
+function isSearchTool(toolName: string): boolean {
+  return /search|find|lookup|query/i.test(toolName);
+}
+
+function isCartTool(toolName: string): boolean {
+  return /cart|basket/i.test(toolName) && /add|create|update|stage/i.test(toolName);
+}
+
+function isCheckoutTool(toolName: string): boolean {
+  return /checkout|place.?order|create.?order/i.test(toolName);
+}
+
 /**
  * Returns an object of tool definitions keyed by `zepto_<mcpToolName>`.
  * Returns {} if the user hasn't connected Zepto or if the MCP is unreachable.
@@ -183,10 +199,41 @@ export async function buildZeptoTools(userId: string): Promise<Record<string, To
         }
         try {
           const result = await callZeptoTool(userToken, mt.name, args);
+          const summary = summarizeResult(mt.name, result);
           if (result.isError) {
-            return { error: summarizeResult(mt.name, result) };
+            return { error: summary };
           }
-          return { result: summarizeResult(mt.name, result) };
+
+          if (isSearchTool(mt.name)) {
+            await saveZeptoSearchTask({
+              userId,
+              searchTool: agentName,
+              searchArgs: args,
+              searchResult: summary,
+            });
+          } else if (isCartTool(mt.name)) {
+            await updateZeptoOrderTaskState({
+              userId,
+              patch: {
+                phase: 'cart_staged',
+                cartResult: summary,
+                updatedReason: 'zepto_cart',
+              },
+              status: 'active',
+            });
+          } else if (isCheckoutTool(mt.name)) {
+            await updateZeptoOrderTaskState({
+              userId,
+              patch: {
+                phase: 'checkout_attempted',
+                checkoutResult: summary,
+                updatedReason: 'zepto_checkout',
+              },
+              status: 'completed',
+            });
+          }
+
+          return { result: summary };
         } catch (err) {
           log.error(`zepto_${mt.name} failed for user ${userId}`, err);
           return { error: err instanceof Error ? err.message : String(err) };

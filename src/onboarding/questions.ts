@@ -9,6 +9,7 @@
  */
 
 import { parseTimeOfDay, formatTimeOfDay } from '../utils/time.js';
+import { escapeHtml } from '../utils/html.js';
 
 export type OnboardingStep =
   | 'ask_name'
@@ -34,25 +35,25 @@ export interface StepError {
 
 export const ONBOARDING_PROMPTS: Record<OnboardingStep, (name?: string) => string> = {
   ask_name: () =>
-    "Oye! 👋\n\nThe name's *Aaj Kya Khaun* — literally 'what should I eat today', which is the only real question in life tbh 🍽️\n\nThink of me as that one friend who's *always* thinking about food and won't let you eat Maggi three nights in a row.\n\nSo... what do I call you?",
+    "Oye! 👋\n\nThe name's <b>Aaj Kya Khaun</b> — literally “what should I eat today”, which is the only real question in life tbh 🍽️\n\nThink of me as that one friend who's <i>always</i> thinking about food and won't let you eat Maggi three nights in a row.\n\nSo... what do I call you?",
 
   ask_diet: (name) =>
-    `Noted, ${name} 📝\n\nQuick vibe check — what's your food situation?\n\n*1* 🥦 Pure veg (dal chawal squad)\n*2* 🍗 Non-veg (chicken in the house)\n*3* 🥚 Egg-etarian (veg + anda)\n*4* 🌱 Vegan (no dairy, no drama)\n\nJust reply with the number.`,
+    `Noted, ${escapeHtml(name ?? 'there')} 📝\n\n<b>Quick vibe check</b> — what's your food situation?\n\n1. 🥦 Pure veg (dal chawal squad)\n2. 🍗 Non-veg (chicken in the house)\n3. 🥚 Egg-etarian (veg + anda)\n4. 🌱 Vegan (no dairy, no drama)\n\nTap one below, or reply with the number.`,
 
   ask_breakfast_time: () =>
-    "Cool cool 😎\n\nNow the serious business — meal reminders, so I can bug you at the right time.\n\nWhen do you usually have *breakfast*? ☕🍳\nReply in HH:MM format (like *08:30*).\n\nOr type *skip* if you're one of those 'breakfast is a scam' people 🙄",
+    "Cool cool 😎\n\nNow the serious business — meal reminders, so I can bug you at the right time.\n\nWhen do you usually have <b>breakfast</b>? ☕🍳\nReply in HH:MM format, like <code>08:30</code>.\n\nOr tap <b>Skip</b> if you're one of those “breakfast is a scam” people 🙄",
 
   ask_lunch_time: () =>
-    'And *lunch*? 🍛\n\n(HH:MM — or *skip* if lunch is more of a concept to you)',
+    'And <b>lunch</b>? 🍛\n\nReply like <code>13:30</code>, or tap <b>Skip</b> if lunch is more of a concept to you.',
 
   ask_snack_time: () =>
-    "Snack o'clock? 🍿\n\n(HH:MM — or *skip*, no judgment if you're a proud 3-meals-only warrior)",
+    "Snack o'clock? 🍿\n\nReply like <code>17:00</code>, or tap <b>Skip</b>. No judgment if you're a proud 3-meals-only warrior.",
 
   ask_dinner_time: () =>
-    "And finally — *dinner* 🌙\n\n(HH:MM — or *skip* if you're on that intermittent fasting grind)",
+    "And finally — <b>dinner</b> 🌙\n\nReply like <code>21:00</code>, or tap <b>Skip</b> if you're on that intermittent fasting grind.",
 
   complete: (name) =>
-    `Boom 💥 We're in business, ${name}!\n\nHere's the drill:\n\n📄 *Drop your grocery bills here* — PDFs from Blinkit / Zepto / BigBasket etc. I'll magically turn them into your kitchen inventory.\n\n🍴 Say *"bhook lagi"* or *"I'm hungry"* anytime and I'll suggest something based on what you *actually* have. No 'sorry we don't have that' moments.\n\n⏰ I'll ping you at meal times so you don't end up doomscrolling through Swiggy at midnight 👀\n\n✍️ Boss me around:\n   • *"add paneer"*\n   • *"milk khatam"*\n   • *"what's in my kitchen?"*\n\n🔬 *Bonus:* Say *"track my nutrition"* and I'll set up personalized calorie & macro targets based on your body profile. Science-backed (IFCT 2017 + ICMR guidelines), not guesswork.\n\nNow go dig up a grocery invoice and let's see what's cooking 🧑‍🍳`,
+    `Boom 💥 We're in business, <b>${escapeHtml(name ?? 'there')}</b>!\n\n<b>Here's the drill</b>\n\n📄 <b>Drop grocery bill PDFs</b> from Blinkit / Zepto / BigBasket. I'll turn them into kitchen inventory.\n\n🍴 Say <b>“bhook lagi”</b> or <b>“I'm hungry”</b> and I'll suggest something from what you <i>actually</i> have.\n\n⏰ I'll ping you at meal times so you don't end up doomscrolling through Swiggy at midnight 👀\n\n✍️ Boss me around:\n• <code>add paneer</code>\n• <code>milk khatam</code>\n• <code>what's in my kitchen?</code>\n\n🔬 <b>Bonus:</b> Say <code>track my nutrition</code> for personalized calorie and macro targets.\n\nNow drop a grocery invoice or tap a starter below 🧑‍🍳`,
 };
 
 /** Validates the name step. */
@@ -99,7 +100,7 @@ export function validateDiet(input: string): StepResult<DietType> | StepError {
     return {
       ok: false,
       error:
-        "Hmm, that's not on the menu 🤨\n\nPick one:\n*1* Veg, *2* Non-veg, *3* Egg, *4* Vegan",
+        "Hmm, that's not on the menu 🤨\n\nPick one:\n<b>1</b> Veg, <b>2</b> Non-veg, <b>3</b> Egg, <b>4</b> Vegan",
     };
   }
   return { ok: true, value: match };
@@ -123,7 +124,7 @@ export function validateTime(
     return {
       ok: false,
       error:
-        "That's not a time, boss 🕐\n\nFormat is *HH:MM* (like *08:30* or *21:15*). Or just type *skip*.",
+        "That's not a time, boss 🕐\n\nFormat is <b>HH:MM</b>, like <code>08:30</code> or <code>21:15</code>. Or tap/type <b>skip</b>.",
     };
   }
   return { ok: true, value: formatTimeOfDay(parsed.hour, parsed.minute) };
