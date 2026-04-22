@@ -6,7 +6,7 @@
  * closes over the current user's id — the LLM can never target another user.
  */
 
-import { tool } from 'ai';
+import { tool, type Tool } from 'ai';
 import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { db } from '../config/database.js';
@@ -18,16 +18,56 @@ import { registerNightlyCron } from '../services/nightly.js';
 import { saveHealthProfile, estimateMealNutrition, getDailySummary, type FoodPortion } from '../services/nutrition.js';
 import { parseTimeOfDay, formatTimeOfDay, todayInTimezone } from '../utils/time.js';
 import { buildZeptoTools } from './zepto-tools.js';
+import type { Intent } from './intent.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('tools');
 
 const MEAL_TYPE = z.enum(['breakfast', 'lunch', 'snack', 'dinner']);
 
-export async function buildTools(userId: string) {
-  const zeptoTools = await buildZeptoTools(userId);
+/**
+ * Tool-availability policy per intent. Each tool name maps to the intents
+ * for which the tool should be exposed to the LLM. Keep this map tight —
+ * every extra tool in every turn is 100-300 tokens on the prompt.
+ *
+ * Tools that touch pantry/inventory are available in cook, pantry, order,
+ * and track because the agent may need to update state mid-flow regardless
+ * of the turn's primary intent (e.g. user adds a new item to pantry while
+ * logging a meal).
+ */
+const TOOL_INTENTS: Record<string, ReadonlyArray<Intent>> = {
+  // Pantry / inventory mutations — broadly useful
+  add_inventory_item: ['cook', 'pantry', 'order', 'track', 'chitchat'],
+  remove_inventory_item: ['cook', 'pantry'],
+  mark_items_finished: ['pantry'],
 
-  const staticTools = {
+  // Config-ish tools — only when the user is actually changing settings
+  set_meal_schedule: ['config'],
+  remove_meal_schedule: ['config'],
+  update_diet_type: ['config'],
+  set_nightly_time: ['config'],
+
+  // Nutrition + meal logging
+  set_health_profile: ['track', 'config'],
+  log_meal: ['cook', 'track'],
+  get_nutrition_summary: ['cook', 'track'],
+};
+
+function includeTool(name: string, intent: Intent): boolean {
+  const allowed = TOOL_INTENTS[name];
+  // Unknown tools default to included — keeps things working if someone
+  // adds a tool and forgets to update this map.
+  if (!allowed) return true;
+  return allowed.includes(intent);
+}
+
+export async function buildTools(userId: string, intent: Intent = 'cook') {
+  // Zepto tools: only when ordering. Saves ~2k tokens on non-order turns
+  // AND one RPC round-trip (tools/list) since we skip the MCP call entirely.
+  const zeptoTools: Record<string, Tool> =
+    intent === 'order' ? await buildZeptoTools(userId) : {};
+
+  const allStatic = {
     add_inventory_item: tool({
       description:
         'Add a single item to the user\'s kitchen inventory. Use this when the user says "add X" or "I just bought X".',
@@ -297,7 +337,17 @@ export async function buildTools(userId: string) {
         return summary;
       },
     }),
-  };
+  } satisfies Record<string, Tool>;
+
+  // Filter the static tool set by intent
+  const staticTools: Record<string, Tool> = {};
+  for (const [name, t] of Object.entries(allStatic)) {
+    if (includeTool(name, intent)) staticTools[name] = t;
+  }
+
+  log.debug(
+    `buildTools intent=${intent} static=${Object.keys(staticTools).length} zepto=${Object.keys(zeptoTools).length}`,
+  );
 
   return { ...staticTools, ...zeptoTools };
 }

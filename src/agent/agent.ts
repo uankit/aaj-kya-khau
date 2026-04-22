@@ -21,14 +21,19 @@ import { messages } from '../db/schema.js';
 import { model } from '../llm/client.js';
 import { sendText } from '../services/telegram.js';
 import { parseAndSaveInvoice } from '../services/invoice.js';
+import { hasZeptoConnected } from '../services/mcp/zepto-account.js';
 import { loadContext } from './context.js';
 import { buildSystemPrompt, type TurnTrigger } from './system-prompt.js';
 import { buildTools } from './tools.js';
+import { classifyIntent, type Intent } from './intent.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('agent');
 
-const MAX_TOOL_STEPS = 5;
+// Lowered from 5 → 3. Most ordering turns only need: preferences → search →
+// present options (1 turn), then confirm → add_to_cart → checkout (next turn).
+// Higher ceilings just inflate token usage via re-sent tool results.
+const MAX_TOOL_STEPS = 3;
 // LLM hard ceiling. GPT-4o usually answers in <5s; anything over 30s is hung.
 // Hitting this limit aborts the request at the HTTP client level and we fall
 // back to a friendly error reply rather than letting the user hang forever.
@@ -85,13 +90,29 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
     // ── 3. Load context fresh (inventory will already reflect the PDF) ────
     const ctx = await loadContext(userId);
 
+    // ── 3a. Classify intent for message turns ────────────────────────────
+    // Drives which tools are loaded and which system prompt sections fire.
+    // Non-message triggers (nudges/nightly) don't need classification — they
+    // have their own fixed prompt path.
+    let intent: Intent | undefined;
+    if (trigger.type === 'message') {
+      intent = await classifyIntent(trigger.text, ctx.history);
+      log.info(`turn intent=${intent} user=${userId}`);
+    }
+
+    // Only relevant for order turns — we could defer this query but it's a
+    // single indexed lookup, cheap.
+    const zeptoConnected = intent === 'order' || intent === 'cook' || intent === 'pantry'
+      ? await hasZeptoConnected(userId)
+      : false;
+
     // ── 4. Build system prompt + messages ──────────────────────────────────
     const llmTrigger: TurnTrigger =
       trigger.type === 'message'
         ? { type: 'message', text: trigger.text, hasPdf: pdfSummary !== null }
         : trigger;
 
-    const system = buildSystemPrompt(ctx, llmTrigger);
+    const system = buildSystemPrompt(ctx, llmTrigger, { intent, zeptoConnected });
 
     const historyMessages: CoreMessage[] = ctx.history.map((m) => ({
       role: m.role,
@@ -140,7 +161,9 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
     }
 
     // ── 5. Call LLM with tools ─────────────────────────────────────────────
-    const tools = await buildTools(userId);
+    // Tool set is intent-gated: non-order turns don't load Zepto tools at
+    // all (saves ~2k tokens + one MCP round-trip).
+    const tools = await buildTools(userId, intent);
 
     const result = await generateText({
       model,
