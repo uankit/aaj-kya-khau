@@ -29,6 +29,8 @@ import { agentTasks, users, type AgentTask } from '../db/schema.js';
 import { getValidZeptoAccessToken } from '../services/mcp/zepto-account.js';
 import {
   callZeptoTool,
+  invalidateZeptoSession,
+  listZeptoTools,
   type McpToolResult,
 } from '../services/mcp/zepto-client.js';
 import { createLogger } from '../utils/logger.js';
@@ -270,8 +272,35 @@ async function registerZeptoSession(
   userId: string,
   token: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // DEBUG: one-time dump of Zepto's tool catalog + user-related schemas.
+  // Remove once we know the correct update_user_name arg shape.
+  try {
+    const allTools = await listZeptoTools(token);
+    const registerish = allTools.filter((t) =>
+      /user|register|profile|name/i.test(t.name),
+    );
+    log.info('DEBUG zepto tools/list — user/registration-related', {
+      userId,
+      totalTools: allTools.length,
+      allToolNames: allTools.map((t) => t.name),
+      registerishTools: registerish.map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      })),
+    });
+  } catch (err) {
+    log.warn('DEBUG tools/list failed (non-fatal)', err);
+  }
+
   try {
     const details = await callZeptoTool(token, 'get_user_details', {});
+    log.info('DEBUG get_user_details raw response', {
+      userId,
+      isError: details.isError ?? false,
+      content: details.content,
+      structuredContent: (details as { structuredContent?: unknown }).structuredContent,
+    });
     if (details.isError) {
       return { ok: false, error: `get_user_details: ${flattenText(details).slice(0, 200)}` };
     }
@@ -285,10 +314,15 @@ async function registerZeptoSession(
   // Pass under multiple plausible keys — Zepto's schema errored on empty
   // "Full name", suggesting the actual arg is `fullName`, not `name`. Send
   // both so we're robust to either shape.
+  const updateArgs = { fullName, name: fullName };
   try {
-    const updated = await callZeptoTool(token, 'update_user_name', {
-      fullName,
-      name: fullName,
+    const updated = await callZeptoTool(token, 'update_user_name', updateArgs);
+    log.info('DEBUG update_user_name raw response', {
+      userId,
+      argsSent: updateArgs,
+      isError: updated.isError ?? false,
+      content: updated.content,
+      structuredContent: (updated as { structuredContent?: unknown }).structuredContent,
     });
     if (updated.isError) {
       return { ok: false, error: `update_user_name: ${flattenText(updated).slice(0, 200)}` };
@@ -296,6 +330,15 @@ async function registerZeptoSession(
   } catch (err) {
     return { ok: false, error: `update_user_name threw: ${err instanceof Error ? err.message : String(err)}` };
   }
+
+  // Force a fresh MCP session on the next call. Zepto's server appears to
+  // cache the "unregistered" state on the session it was initialized with —
+  // even after update_user_name persists (confirmed: the name shows up in
+  // the Zepto app), subsequent tool calls on the same session still fail
+  // with "Registration required". Dropping the session makes the next tool
+  // call re-initialize and read the updated registration state.
+  invalidateZeptoSession(token);
+  log.info('Zepto session invalidated post-registration to force fresh init', { userId });
 
   return { ok: true };
 }

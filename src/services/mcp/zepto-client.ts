@@ -133,6 +133,10 @@ async function ensureSession(accessToken: string): Promise<string> {
   return sessionId;
 }
 
+export function invalidateZeptoSession(accessToken: string): void {
+  sessionCache.delete(accessToken);
+}
+
 function invalidateSession(accessToken: string): void {
   sessionCache.delete(accessToken);
 }
