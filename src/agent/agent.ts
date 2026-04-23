@@ -26,15 +26,15 @@ import { loadContext } from './context.js';
 import { buildSystemPrompt, type TurnTrigger } from './system-prompt.js';
 import { buildTools } from './tools.js';
 import { classifyIntent, type Intent } from './intent.js';
-import { getActiveZeptoOrderTask } from '../tasks/agent-task-store.js';
+import { runOrderTurn } from '../workflows/zepto-order.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('agent');
 
-// The LLM owns the full Zepto ordering flow end-to-end: search →
-// add-to-cart → checkout → text confirmation. 5 steps is enough headroom
-// for that sequence plus the occasional retry. Token cost is bounded by
-// per-tool-result filtering in zepto-tools.ts.
+// The LLM handles cook / pantry / track / config / chitchat intents via
+// the static tools in tools.ts. Zepto ordering is OWNED by the workflow
+// in src/workflows/zepto-order.ts — the LLM never calls zepto_* tools.
+// 3-4 steps is plenty for the non-ordering cases; 5 leaves headroom.
 const MAX_TOOL_STEPS = 5;
 // LLM hard ceiling. GPT-4o usually answers in <5s; anything over 30s is hung.
 // Hitting this limit aborts the request at the HTTP client level and we fall
@@ -115,30 +115,42 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
     const ctx = await loadContext(userId);
 
     // ── 3a. Classify intent for message turns ────────────────────────────
-    // Drives which tools are loaded and which system prompt sections fire.
-    // Non-message triggers (nudges/nightly) don't need classification — they
-    // have their own fixed prompt path.
+    // Drives which tools / prompt sections fire, and whether we dispatch
+    // to the Zepto workflow instead of the LLM.
     let intent: Intent | undefined;
+    let orderQuery: string | undefined;
     if (trigger.type === 'message') {
-      intent = await classifyIntent(trigger.text, ctx.history);
-      log.info(`turn intent=${intent} user=${userId}`);
+      const classified = await classifyIntent(trigger.text, ctx.history);
+      intent = classified.intent;
+      orderQuery = classified.orderQuery;
+      log.info(`turn intent=${intent} user=${userId}`, orderQuery ? { orderQuery } : undefined);
     }
 
-    // Only relevant for order/cook/pantry turns — cheap indexed lookup.
-    const zeptoConnected = intent === 'order' || intent === 'cook' || intent === 'pantry'
+    // ── 3b. Order intent → deterministic workflow ────────────────────────
+    // Zepto ordering no longer goes through the LLM tool loop. The workflow
+    // owns address ensurance, search, selection, confirmation, update_cart,
+    // and create_order — all with structured state persisted in agent_tasks.
+    if (trigger.type === 'message' && intent === 'order') {
+      if (!(await hasZeptoConnected(userId))) {
+        await sendAndPersist(
+          userId,
+          "Zepto isn't connected yet. Run <b>/connect_zepto</b> first so I can place orders for you 🛒",
+        );
+        return;
+      }
+      const reply = await runOrderTurn({
+        userId,
+        message: trigger.text,
+        orderQuery,
+      });
+      await sendAndPersist(userId, reply.text);
+      return;
+    }
+
+    // Only relevant for cook/pantry turns — cheap indexed lookup.
+    const zeptoConnected = intent === 'cook' || intent === 'pantry'
       ? await hasZeptoConnected(userId)
       : false;
-
-    // When the user is continuing an ordering flow (just searched, now
-    // they said "yes" or "the 2nd one"), pull the stored search summary.
-    // This is the only way the LLM can see product IDs from the previous
-    // turn's tool_result — Vercel AI SDK tool results aren't persisted in
-    // the messages table.
-    let activeOrderContext: string | undefined;
-    if (intent === 'order') {
-      const task = await getActiveZeptoOrderTask(userId);
-      if (task) activeOrderContext = task.state.searchResult;
-    }
 
     // ── 4. Build system prompt + messages ──────────────────────────────────
     const llmTrigger: TurnTrigger =
@@ -149,7 +161,6 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
     const system = buildSystemPrompt(ctx, llmTrigger, {
       intent,
       zeptoConnected,
-      activeOrderContext,
     });
 
     const historyMessages: CoreMessage[] = ctx.history.map((m) => ({

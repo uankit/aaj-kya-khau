@@ -77,45 +77,19 @@ const TRACK_RULES = `TRACKING / NUTRITION RULES:
 • If nutrition tracking is NOT set up and the user mentions calories/protein/macros/weight/diet, nudge once: they can say "track my nutrition" to set personalized targets.`;
 
 /**
- * Extra rules injected only when the user is in an ordering turn AND has
- * connected Zepto. Includes the full cart flow, confirmation requirements,
- * and payment-method guidance. NOT included on other turns — saves ~600
- * tokens on every non-ordering turn.
+ * Ordering note injected on cook / pantry turns so the LLM knows Zepto
+ * exists and can nudge the user when a recipe needs a missing ingredient.
+ * The LLM does NOT handle the order flow itself — the deterministic
+ * workflow in src/workflows/zepto-order.ts owns that.
  */
-const ORDER_RULES = `ZEPTO ORDERING RULES:
-• CRITICAL — ORDERS ARE REAL MONEY AND CANNOT BE CANCELLED. Every order is a one-way door. Err on the side of one more confirming question rather than assuming.
-• Cravings count. If the user says they're craving a specific packaged thing (Bournville, chips, Coke, ice cream, biscuits), first check CURRENT INVENTORY. If it's not there and Zepto is connected, offer to grab that specific thing from Zepto.
-• You OWN the full cart flow end-to-end via the zepto_* tools. You'll see tools for search, cart management (add/update/remove), and checkout. Read their descriptions — they're the source of truth for arg shapes.
-• Only call a Zepto history tool (e.g. zepto_get_past_order_items) when the user EXPLICITLY asks about their past orders. Never use it as a fallback search or a "let me check what they bought before" tangent. Go straight to search for a stated item.
-• Search results have TWO parts: DISPLAY prose (show to the user) and DATA JSON (for your tool args). The prose has NO IDs — you must extract id / productId / variantId / storeProductId / cartProductId etc. from the DATA block when calling add-to-cart or update-cart. Never hallucinate an ID. If DATA is absent or says "product IDs unavailable", tell the user plainly and stop — do not retry with different searches in the same turn.
-• Flow:
-  1. Call the Zepto search tool with a natural-language query. You'll get back a top-3 filtered JSON list of products, each with fields like id / productId / variantId / storeProductId / price / name / packSize. Remember these IDs — you'll need them for add-to-cart.
-  2. Present 1-3 options to the user in plain chat: <b>name</b>, pack size, <b>price</b>, <b>ETA</b>. Scannable. Ask which one (or "this one, confirm?" if there's just one).
-  3. WAIT for explicit user confirmation ("yes", "haan", "go ahead", "the first one", "2"). A decisive-sounding earlier message ("I want paneer") is NOT confirmation — it's a signal to search.
-  4. Offer to bundle ONCE only if it feels natural: "Since I'm grabbing this, want anything else?" Don't loop.
-  5. On confirmation: call the Zepto add-to-cart tool. Pass the required IDs from the search result. If add-to-cart requires a structured shape like <code>cartItems: [{productId, quantity}]</code>, construct it — don't pass a flat product object. Quantity defaults to 1 unless the user specified otherwise.
-     CART HYGIENE — CRITICAL: if the add-to-cart tool's schema has a <code>replaceCart</code> parameter (Zepto's update_cart does), pass <code>replaceCart: true</code> on the FIRST add-to-cart call of any fresh order flow. This wipes any stuck items from previous failed attempts. Only pass <code>replaceCart: false</code> (or omit) when the user is intentionally bundling with an item already in the cart in THIS same flow.
-  6. After add-to-cart succeeds, call the Zepto checkout tool with COD as the payment method. Do not use UPI / Card / Zepto Cash / Reserve Pay even if the schema accepts them.
-  7. After checkout, reply with plain text: order id (if returned), ETA, COD total. Remind the user to tell you when it arrives so the pantry updates.
-• If any Zepto tool returns an error, surface the error plainly to the user and STOP — don't retry silently with different args. Never place an order if add-to-cart failed.
-• Do NOT call checkout unless you've just successfully called add-to-cart in this same flow.
-• ADDRESS HANDLING: Zepto is hyperlocal. Product availability and order placement depend on a delivery address being set on the user's Zepto account. Usually the user's default address is picked up automatically — DON'T preemptively call address tools. BUT: if search returns empty for something common (like "bread" or "milk") OR if checkout fails with a generic "Bad Request", it's very likely no delivery address is active. In that case: call the Zepto address-listing tool if available, see whether the user has one, and either select the default or tell the user to open the Zepto app and set a delivery address before retrying. Don't loop — one attempt to recover, then hand off.`;
+const ORDERING_HANDOFF = `ORDERING AVAILABLE: The user has connected Zepto. If a meal they want needs an ingredient they don't have, you MAY mention they can ask you to order it — but you do NOT place orders yourself. Simply suggest "want me to order some from Zepto?" and let the user say yes. A separate workflow handles the actual ordering; you'll see them return with a confirmation or an error.`;
 
 const ZEPTO_NOT_CONNECTED_HINT = `ZEPTO: The user hasn't connected Zepto. If they ask to order something, mention once that they can /connect_zepto to enable ordering from chat. Then move on.`;
-
-const ORDER_CONFIRMATION_HINT = `CONFIRMATION HINT: You are in an ORDER flow. The user's current message likely is either a request to search for a new item, or a confirmation of an earlier proposal — look at the recent conversation to see which.`;
 
 export interface BuildSystemPromptOptions {
   intent?: Intent;
   /** True if this user has a live Zepto account. Controls ordering hint text. */
   zeptoConnected?: boolean;
-  /**
-   * Trimmed search-result summary from a recent zepto_search call (fetched
-   * from agent_tasks). Injected into the ORDER prompt so the LLM remembers
-   * product IDs across turns even though tool_results don't persist in the
-   * message history.
-   */
-  activeOrderContext?: string;
 }
 
 /**
@@ -207,16 +181,14 @@ export function buildSystemPrompt(
   if (intent === 'cook' || intent === 'system-trigger') ruleSections.push(COOK_RULES);
   if (intent === 'pantry') ruleSections.push(PANTRY_RULES);
   if (intent === 'track' || intent === 'system-trigger') ruleSections.push(TRACK_RULES);
-  if (intent === 'order') {
-    if (options.zeptoConnected) ruleSections.push(ORDER_RULES, ORDER_CONFIRMATION_HINT);
-    else ruleSections.push(ZEPTO_NOT_CONNECTED_HINT);
-  }
-  // On cook/pantry intents when Zepto IS connected, hint lightly that
-  // ordering exists so the agent surfaces it when an ingredient is missing.
+  // On cook/pantry intents, hint about the ordering handoff so the agent
+  // can nudge the user toward Zepto when an ingredient is missing — but
+  // the LLM never places orders itself; the workflow does that.
   if ((intent === 'cook' || intent === 'pantry') && options.zeptoConnected) {
-    ruleSections.push(
-      'ORDERING AVAILABLE: The user has connected Zepto. If they want a meal that needs an ingredient they don\'t have, you MAY offer to order just the missing ingredient — but only for that specific missing thing, and only if they seem interested. Never upsell.',
-    );
+    ruleSections.push(ORDERING_HANDOFF);
+  }
+  if (intent === 'cook' && !options.zeptoConnected) {
+    ruleSections.push(ZEPTO_NOT_CONNECTED_HINT);
   }
   ruleSections.push(EXAMPLES);
 
@@ -232,15 +204,6 @@ export function buildSystemPrompt(
       : `INVENTORY: ${inventoryBlock}`,
   );
   if (mealsBlock) contextParts.push(`RECENT MEALS (last 3 days):\n${mealsBlock}`);
-
-  // Carry product IDs from the last zepto_search into this turn so the
-  // LLM can call add-to-cart with correct args even though tool_results
-  // aren't persisted in message history.
-  if (intent === 'order' && options.activeOrderContext) {
-    contextParts.push(
-      `RECENT ZEPTO SEARCH (from your previous turn — use these IDs, do NOT re-search unless the user asked for something different):\n${options.activeOrderContext}`,
-    );
-  }
 
   const triggerBlock = formatTrigger(trigger);
 

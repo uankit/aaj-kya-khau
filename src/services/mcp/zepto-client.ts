@@ -15,6 +15,10 @@
  * (e.g. expired), we re-initialize and retry once.
  */
 
+import { createLogger } from '../../utils/logger.js';
+
+const log = createLogger('mcp-zepto');
+
 const MCP_ENDPOINT = 'https://mcp.zepto.co.in/mcp';
 const REQUEST_TIMEOUT_MS = 25_000;
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -160,10 +164,19 @@ async function rpcOnce<T>(
 
   const rawText = await res.text();
 
+  // Verbose mode: dump the full raw HTTP body from Zepto. Gated to debug
+  // level so it's off in prod. Essential when drilling into a weird 400.
+  log.debug(`MCP ${method} raw response`, {
+    status: res.status,
+    contentType: res.headers.get('content-type') ?? '',
+    bodyLength: rawText.length,
+    body: rawText.slice(0, 6000),
+  });
+
   if (!res.ok) {
     // Surface the status so the caller can decide whether to re-init the session
     throw new ZeptoMcpError(
-      `Zepto MCP ${method} failed: ${res.status} ${rawText.slice(0, 200)}`,
+      `Zepto MCP ${method} failed: ${res.status} ${rawText.slice(0, 500)}`,
       res.status,
     );
   }

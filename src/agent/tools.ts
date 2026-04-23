@@ -17,7 +17,6 @@ import { registerMealCron, unregisterMealCron } from '../services/scheduler.js';
 import { registerNightlyCron } from '../services/nightly.js';
 import { saveHealthProfile, estimateMealNutrition, getDailySummary, type FoodPortion } from '../services/nutrition.js';
 import { parseTimeOfDay, formatTimeOfDay, todayInTimezone } from '../utils/time.js';
-import { buildZeptoTools } from './zepto-tools.js';
 import type { Intent } from './intent.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -62,11 +61,8 @@ function includeTool(name: string, intent: Intent): boolean {
 }
 
 export async function buildTools(userId: string, intent: Intent = 'cook') {
-  // Zepto tools: only when ordering. Saves ~2k tokens on non-order turns
-  // AND one RPC round-trip (tools/list) since we skip the MCP call entirely.
-  const zeptoTools: Record<string, Tool> =
-    intent === 'order' ? await buildZeptoTools(userId) : {};
-
+  // Zepto ordering is handled by the deterministic workflow in
+  // src/workflows/zepto-order.ts — the LLM never sees zepto_* tools.
   const allStatic = {
     add_inventory_item: tool({
       description:
@@ -346,10 +342,10 @@ export async function buildTools(userId: string, intent: Intent = 'cook') {
   }
 
   log.debug(
-    `buildTools intent=${intent} static=${Object.keys(staticTools).length} zepto=${Object.keys(zeptoTools).length}`,
+    `buildTools intent=${intent} static=${Object.keys(staticTools).length}`,
   );
 
-  return { ...staticTools, ...zeptoTools };
+  return staticTools;
 }
 
 export type AgentTools = ReturnType<typeof buildTools>;
