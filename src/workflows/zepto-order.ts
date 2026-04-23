@@ -245,6 +245,20 @@ async function mcp<T>(
 }
 
 /**
+ * Massage whatever name we have on file into a "full name" Zepto will
+ * accept. Zepto rejects empty or single-word names. We never want to block
+ * the order flow asking for a last name, so: empty → "Friend User",
+ * single-word → append " User" as a filler last name.
+ */
+function buildZeptoFullName(raw: string | null | undefined): string {
+  const trimmed = raw?.trim() ?? '';
+  if (!trimmed) return 'Friend User';
+  const parts = trimmed.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return `${parts[0]} User`;
+  return parts.join(' ');
+}
+
+/**
  * One-time Zepto MCP registration handshake. Zepto's server requires this
  * exact call order on first use of a newly-issued OAuth token:
  *   1. get_user_details — probably returns the bound profile stub
@@ -266,10 +280,16 @@ async function registerZeptoSession(
   }
 
   const [row] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
-  const name = row?.name?.trim() || 'User';
+  const fullName = buildZeptoFullName(row?.name);
 
+  // Pass under multiple plausible keys — Zepto's schema errored on empty
+  // "Full name", suggesting the actual arg is `fullName`, not `name`. Send
+  // both so we're robust to either shape.
   try {
-    const updated = await callZeptoTool(token, 'update_user_name', { name });
+    const updated = await callZeptoTool(token, 'update_user_name', {
+      fullName,
+      name: fullName,
+    });
     if (updated.isError) {
       return { ok: false, error: `update_user_name: ${flattenText(updated).slice(0, 200)}` };
     }
