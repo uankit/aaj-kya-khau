@@ -128,17 +128,43 @@ async function ensureSession(accessToken: string): Promise<string> {
   if (entry && Date.now() - entry.initializedAt < SESSION_TTL_MS) {
     return entry.sessionId;
   }
+  // TTL expired (or no entry). If there was a stale entry, notify listeners
+  // so upstream caches aligned to this session drop their state too.
+  if (entry) {
+    sessionCache.delete(accessToken);
+    fireEviction(accessToken);
+  }
   const sessionId = await initializeSession(accessToken);
   sessionCache.set(accessToken, { sessionId, initializedAt: Date.now() });
   return sessionId;
 }
 
+/** Listeners notified whenever a cached MCP session is dropped. Used by
+ * upstream layers (e.g. zepto-session) to invalidate their own per-token
+ * state in lockstep — without them, a client-side reinit would silently
+ * leave higher-level caches stale. */
+const sessionEvictionListeners = new Set<(accessToken: string) => void>();
+
+export function onZeptoSessionEvicted(cb: (accessToken: string) => void): void {
+  sessionEvictionListeners.add(cb);
+}
+
+function fireEviction(accessToken: string): void {
+  for (const cb of sessionEvictionListeners) {
+    try {
+      cb(accessToken);
+    } catch (err) {
+      log.warn('session eviction listener threw (non-fatal)', err);
+    }
+  }
+}
+
 export function invalidateZeptoSession(accessToken: string): void {
-  sessionCache.delete(accessToken);
+  if (sessionCache.delete(accessToken)) fireEviction(accessToken);
 }
 
 function invalidateSession(accessToken: string): void {
-  sessionCache.delete(accessToken);
+  if (sessionCache.delete(accessToken)) fireEviction(accessToken);
 }
 
 async function rpcOnce<T>(

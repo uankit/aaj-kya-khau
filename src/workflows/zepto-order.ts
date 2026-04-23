@@ -25,12 +25,13 @@
 
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { agentTasks, users, type AgentTask } from '../db/schema.js';
-import { getValidZeptoAccessToken } from '../services/mcp/zepto-account.js';
+import { agentTasks, type AgentTask } from '../db/schema.js';
+import { type McpToolResult } from '../services/mcp/zepto-client.js';
 import {
-  callZeptoTool,
-  type McpToolResult,
-} from '../services/mcp/zepto-client.js';
+  ZeptoSessionNotConnectedError,
+  ZeptoWarmUpError,
+  callZeptoToolWarm,
+} from '../services/mcp/zepto-session.js';
 import { createLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/html.js';
 
@@ -202,29 +203,13 @@ async function mcp<T>(
   toolName: string,
   args: unknown,
 ): Promise<{ ok: true; result: McpToolResult; structured: T | null } | { ok: false; error: string }> {
-  const token = await getValidZeptoAccessToken(userId);
-  if (!token) return { ok: false, error: 'Zepto not connected (no valid token). User should /connect_zepto again.' };
-
   const started = Date.now();
   log.info(`mcp call: ${toolName}`, { userId, args });
   try {
-    let result = await callZeptoTool(token, toolName, args);
-
-    // Self-heal: Zepto's MCP requires a one-time registration handshake
-    // (get_user_details → update_user_name) before any other tool works.
-    // Brand-new OAuth tokens hit this on their very first call. Detect the
-    // server's error message, run the handshake, retry once.
-    if (result.isError && /registration required/i.test(flattenText(result))) {
-      log.info(`mcp ${toolName}: server says registration required — auto-registering`, { userId });
-      const reg = await registerZeptoSession(userId, token);
-      if (!reg.ok) {
-        log.warn(`Zepto auto-registration failed`, { userId, error: reg.error });
-        return { ok: false, error: `Zepto registration failed: ${reg.error}` };
-      }
-      log.info(`Zepto registration complete — retrying ${toolName}`, { userId });
-      result = await callZeptoTool(token, toolName, args);
-    }
-
+    // Session warm-up is owned by the zepto-session layer — by the time we
+    // see `result`, any "Registration required" gating has already been
+    // handled transparently, or thrown a ZeptoWarmUpError.
+    const { result } = await callZeptoToolWarm(userId, toolName, args);
     const ms = Date.now() - started;
 
     if (result.isError) {
@@ -238,97 +223,17 @@ async function mcp<T>(
     return { ok: true, result, structured };
   } catch (err) {
     const ms = Date.now() - started;
+    if (err instanceof ZeptoSessionNotConnectedError) {
+      return { ok: false, error: err.message };
+    }
+    if (err instanceof ZeptoWarmUpError) {
+      log.warn(`mcp ${toolName}: warm-up failed`, { userId, ms, error: err.message });
+      return { ok: false, error: `Zepto session setup failed — ${err.message}` };
+    }
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`mcp ${toolName} threw after ${ms}ms`, err);
     return { ok: false, error: msg };
   }
-}
-
-/**
- * Massage whatever name we have on file into a "full name" Zepto will
- * accept. Zepto rejects empty or single-word names. We never want to block
- * the order flow asking for a last name, so: empty → "Friend User",
- * single-word → append " User" as a filler last name.
- */
-function buildZeptoFullName(raw: string | null | undefined): string {
-  const trimmed = raw?.trim() ?? '';
-  if (!trimmed) return 'Friend User';
-  const parts = trimmed.split(/\s+/).filter(Boolean);
-  if (parts.length === 1) return `${parts[0]} User`;
-  return parts.join(' ');
-}
-
-/**
- * Zepto MCP session warm-up / registration handshake.
- *
- * Zepto's "Registration required" error is session-scoped, not account-
- * scoped — every freshly-initialized MCP session gates shopping tools
- * (list_saved_addresses, search, cart, etc.) behind a warm-up ritual,
- * regardless of whether the underlying Zepto account is actually
- * registered. The ritual:
- *
- *   1. Call get_user_details — this "unlocks" the session. Its response
- *      includes an "isRegistered" flag.
- *   2. Only if isRegistered is false: call update_user_name with a name
- *      we supply. This both completes first-time account registration
- *      AND unlocks the session.
- *
- * Crucially we MUST NOT call update_user_name when the user is already
- * registered — Zepto will happily accept the call and overwrite their
- * real name (confirmed: a user with name "Ruchi Matharu" was clobbered
- * to "Ruchi User" when we called unconditionally).
- *
- * Crucially we MUST NOT invalidate the MCP session here. Invalidating
- * forces the next call to re-initialize a brand-new session — which is
- * unwarmed and hits the same "Registration required" gate again.
- */
-async function registerZeptoSession(
-  userId: string,
-  token: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  let detailsText = '';
-  try {
-    const details = await callZeptoTool(token, 'get_user_details', {});
-    if (details.isError) {
-      return { ok: false, error: `get_user_details: ${flattenText(details).slice(0, 200)}` };
-    }
-    detailsText = flattenText(details);
-  } catch (err) {
-    return { ok: false, error: `get_user_details threw: ${err instanceof Error ? err.message : String(err)}` };
-  }
-
-  // Parse Zepto's text response for "Registered: Yes/No". If we can't tell,
-  // default to "not registered" — the next update_user_name call will either
-  // succeed (setting a name on a blank profile) or be a harmless no-op if
-  // Zepto's gate turns out to be registered-only anyway.
-  const isRegistered = /Registered:\s*Yes/i.test(detailsText);
-  log.info(`Zepto session warm-up: get_user_details ok, isRegistered=${isRegistered}`, { userId });
-
-  if (isRegistered) {
-    // Session is now warm and account is already registered — don't touch
-    // the stored name.
-    return { ok: true };
-  }
-
-  const [row] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
-  const fullName = buildZeptoFullName(row?.name);
-
-  // Pass under multiple plausible keys. Confirmed: Zepto accepts `fullName`;
-  // `name` is kept as cheap defence against schema changes.
-  try {
-    const updated = await callZeptoTool(token, 'update_user_name', {
-      fullName,
-      name: fullName,
-    });
-    if (updated.isError) {
-      return { ok: false, error: `update_user_name: ${flattenText(updated).slice(0, 200)}` };
-    }
-  } catch (err) {
-    return { ok: false, error: `update_user_name threw: ${err instanceof Error ? err.message : String(err)}` };
-  }
-
-  log.info(`Zepto first-time registration complete (name="${fullName}")`, { userId });
-  return { ok: true };
 }
 
 function flattenText(r: McpToolResult): string {
