@@ -25,7 +25,7 @@
 
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { agentTasks, type AgentTask } from '../db/schema.js';
+import { agentTasks, users, type AgentTask } from '../db/schema.js';
 import { getValidZeptoAccessToken } from '../services/mcp/zepto-account.js';
 import {
   callZeptoTool,
@@ -208,7 +208,23 @@ async function mcp<T>(
   const started = Date.now();
   log.info(`mcp call: ${toolName}`, { userId, args });
   try {
-    const result = await callZeptoTool(token, toolName, args);
+    let result = await callZeptoTool(token, toolName, args);
+
+    // Self-heal: Zepto's MCP requires a one-time registration handshake
+    // (get_user_details → update_user_name) before any other tool works.
+    // Brand-new OAuth tokens hit this on their very first call. Detect the
+    // server's error message, run the handshake, retry once.
+    if (result.isError && /registration required/i.test(flattenText(result))) {
+      log.info(`mcp ${toolName}: server says registration required — auto-registering`, { userId });
+      const reg = await registerZeptoSession(userId, token);
+      if (!reg.ok) {
+        log.warn(`Zepto auto-registration failed`, { userId, error: reg.error });
+        return { ok: false, error: `Zepto registration failed: ${reg.error}` };
+      }
+      log.info(`Zepto registration complete — retrying ${toolName}`, { userId });
+      result = await callZeptoTool(token, toolName, args);
+    }
+
     const ms = Date.now() - started;
 
     if (result.isError) {
@@ -226,6 +242,42 @@ async function mcp<T>(
     log.error(`mcp ${toolName} threw after ${ms}ms`, err);
     return { ok: false, error: msg };
   }
+}
+
+/**
+ * One-time Zepto MCP registration handshake. Zepto's server requires this
+ * exact call order on first use of a newly-issued OAuth token:
+ *   1. get_user_details — probably returns the bound profile stub
+ *   2. update_user_name — commits a display name, completes registration
+ * Only after these succeed do other tools (list_saved_addresses, search,
+ * cart, checkout) become callable on that session.
+ */
+async function registerZeptoSession(
+  userId: string,
+  token: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const details = await callZeptoTool(token, 'get_user_details', {});
+    if (details.isError) {
+      return { ok: false, error: `get_user_details: ${flattenText(details).slice(0, 200)}` };
+    }
+  } catch (err) {
+    return { ok: false, error: `get_user_details threw: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  const [row] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
+  const name = row?.name?.trim() || 'User';
+
+  try {
+    const updated = await callZeptoTool(token, 'update_user_name', { name });
+    if (updated.isError) {
+      return { ok: false, error: `update_user_name: ${flattenText(updated).slice(0, 200)}` };
+    }
+  } catch (err) {
+    return { ok: false, error: `update_user_name threw: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  return { ok: true };
 }
 
 function flattenText(r: McpToolResult): string {
