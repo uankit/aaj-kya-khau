@@ -29,8 +29,6 @@ import { agentTasks, users, type AgentTask } from '../db/schema.js';
 import { getValidZeptoAccessToken } from '../services/mcp/zepto-account.js';
 import {
   callZeptoTool,
-  invalidateZeptoSession,
-  listZeptoTools,
   type McpToolResult,
 } from '../services/mcp/zepto-client.js';
 import { createLogger } from '../utils/logger.js';
@@ -261,68 +259,66 @@ function buildZeptoFullName(raw: string | null | undefined): string {
 }
 
 /**
- * One-time Zepto MCP registration handshake. Zepto's server requires this
- * exact call order on first use of a newly-issued OAuth token:
- *   1. get_user_details — probably returns the bound profile stub
- *   2. update_user_name — commits a display name, completes registration
- * Only after these succeed do other tools (list_saved_addresses, search,
- * cart, checkout) become callable on that session.
+ * Zepto MCP session warm-up / registration handshake.
+ *
+ * Zepto's "Registration required" error is session-scoped, not account-
+ * scoped — every freshly-initialized MCP session gates shopping tools
+ * (list_saved_addresses, search, cart, etc.) behind a warm-up ritual,
+ * regardless of whether the underlying Zepto account is actually
+ * registered. The ritual:
+ *
+ *   1. Call get_user_details — this "unlocks" the session. Its response
+ *      includes an "isRegistered" flag.
+ *   2. Only if isRegistered is false: call update_user_name with a name
+ *      we supply. This both completes first-time account registration
+ *      AND unlocks the session.
+ *
+ * Crucially we MUST NOT call update_user_name when the user is already
+ * registered — Zepto will happily accept the call and overwrite their
+ * real name (confirmed: a user with name "Ruchi Matharu" was clobbered
+ * to "Ruchi User" when we called unconditionally).
+ *
+ * Crucially we MUST NOT invalidate the MCP session here. Invalidating
+ * forces the next call to re-initialize a brand-new session — which is
+ * unwarmed and hits the same "Registration required" gate again.
  */
 async function registerZeptoSession(
   userId: string,
   token: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  // DEBUG: one-time dump of Zepto's tool catalog + user-related schemas.
-  // Remove once we know the correct update_user_name arg shape.
-  try {
-    const allTools = await listZeptoTools(token);
-    const registerish = allTools.filter((t) =>
-      /user|register|profile|name/i.test(t.name),
-    );
-    log.info('DEBUG zepto tools/list — user/registration-related', {
-      userId,
-      totalTools: allTools.length,
-      allToolNames: allTools.map((t) => t.name),
-      registerishTools: registerish.map((t) => ({
-        name: t.name,
-        description: t.description,
-        inputSchema: t.inputSchema,
-      })),
-    });
-  } catch (err) {
-    log.warn('DEBUG tools/list failed (non-fatal)', err);
-  }
-
+  let detailsText = '';
   try {
     const details = await callZeptoTool(token, 'get_user_details', {});
-    log.info('DEBUG get_user_details raw response', {
-      userId,
-      isError: details.isError ?? false,
-      content: details.content,
-      structuredContent: (details as { structuredContent?: unknown }).structuredContent,
-    });
     if (details.isError) {
       return { ok: false, error: `get_user_details: ${flattenText(details).slice(0, 200)}` };
     }
+    detailsText = flattenText(details);
   } catch (err) {
     return { ok: false, error: `get_user_details threw: ${err instanceof Error ? err.message : String(err)}` };
+  }
+
+  // Parse Zepto's text response for "Registered: Yes/No". If we can't tell,
+  // default to "not registered" — the next update_user_name call will either
+  // succeed (setting a name on a blank profile) or be a harmless no-op if
+  // Zepto's gate turns out to be registered-only anyway.
+  const isRegistered = /Registered:\s*Yes/i.test(detailsText);
+  log.info(`Zepto session warm-up: get_user_details ok, isRegistered=${isRegistered}`, { userId });
+
+  if (isRegistered) {
+    // Session is now warm and account is already registered — don't touch
+    // the stored name.
+    return { ok: true };
   }
 
   const [row] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
   const fullName = buildZeptoFullName(row?.name);
 
-  // Pass under multiple plausible keys — Zepto's schema errored on empty
-  // "Full name", suggesting the actual arg is `fullName`, not `name`. Send
-  // both so we're robust to either shape.
-  const updateArgs = { fullName, name: fullName };
+  // Pass under multiple plausible keys. Confirmed: Zepto accepts `fullName`;
+  // `name` is kept as cheap defence against schema changes.
   try {
-    const updated = await callZeptoTool(token, 'update_user_name', updateArgs);
-    log.info('DEBUG update_user_name raw response', {
-      userId,
-      argsSent: updateArgs,
-      isError: updated.isError ?? false,
-      content: updated.content,
-      structuredContent: (updated as { structuredContent?: unknown }).structuredContent,
+    const updated = await callZeptoTool(token, 'update_user_name', {
+      fullName,
+      name: fullName,
     });
     if (updated.isError) {
       return { ok: false, error: `update_user_name: ${flattenText(updated).slice(0, 200)}` };
@@ -331,15 +327,7 @@ async function registerZeptoSession(
     return { ok: false, error: `update_user_name threw: ${err instanceof Error ? err.message : String(err)}` };
   }
 
-  // Force a fresh MCP session on the next call. Zepto's server appears to
-  // cache the "unregistered" state on the session it was initialized with —
-  // even after update_user_name persists (confirmed: the name shows up in
-  // the Zepto app), subsequent tool calls on the same session still fail
-  // with "Registration required". Dropping the session makes the next tool
-  // call re-initialize and read the updated registration state.
-  invalidateZeptoSession(token);
-  log.info('Zepto session invalidated post-registration to force fresh init', { userId });
-
+  log.info(`Zepto first-time registration complete (name="${fullName}")`, { userId });
   return { ok: true };
 }
 
