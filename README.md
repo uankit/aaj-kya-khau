@@ -1,3 +1,7 @@
+# Try it out
+
+[Aaj Kya Khaun](https://aaj-kya-khau-production.up.railway.app/)
+
 # Aaj Kya Khaun 🍽️
 
 A Telegram food assistant agent for Indian users. Parses grocery invoice PDFs, tracks kitchen inventory, sends meal-time nudges, and suggests meals based on what you actually have — grounded in peer-reviewed nutrition science, not guesswork.
