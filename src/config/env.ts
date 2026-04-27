@@ -47,6 +47,17 @@ const envSchema = z.object({
   // `npm run zepto:register-client` after PUBLIC_BASE_URL is set.
   ZEPTO_CLIENT_ID: z.string().optional(),
   ZEPTO_REGISTRATION_ACCESS_TOKEN: z.string().optional(),
+
+  // Twilio WhatsApp Cloud API. AUTH_TOKEN is required for sends; FROM is the
+  // approved WhatsApp sender (format: "whatsapp:+14155238886" or your own).
+  // MESSAGING_SERVICE_SID is optional — needed when sending templates with
+  // a service-level configuration; freeform sends work without it.
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_WHATSAPP_FROM: z.string().optional(),
+  TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
+  // Webhook signature validation — Twilio's auth header check.
+  TWILIO_WEBHOOK_VALIDATE: z.coerce.boolean().default(true),
 });
 
 const parsed = envSchema.safeParse(process.env);

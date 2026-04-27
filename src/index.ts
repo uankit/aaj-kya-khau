@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
+import formbody from '@fastify/formbody';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -8,6 +9,7 @@ import { env } from './config/env.js';
 import { pool } from './config/database.js';
 import { healthRoutes } from './routes/health.js';
 import { webhookRoutes } from './routes/webhook.js';
+import { whatsappRoutes } from './routes/whatsapp.js';
 import { oauthRoutes } from './routes/oauth.js';
 import { loadAllSchedules } from './services/scheduler.js';
 import { loadAllNightlyCrons } from './services/nightly.js';
@@ -54,6 +56,9 @@ async function bootstrap() {
     keyGenerator: (req) => req.ip,
   });
 
+  // Twilio posts application/x-www-form-urlencoded.
+  await app.register(formbody);
+
   // Serve CSS/JS/images from /public/ under the /static/ URL prefix.
   const publicDir = resolvePublicDir();
   await app.register(fastifyStatic, {
@@ -69,6 +74,7 @@ async function bootstrap() {
 
   await app.register(healthRoutes);
   await app.register(webhookRoutes);
+  await app.register(whatsappRoutes);
   await app.register(oauthRoutes);
 
   // Load all existing crons from the DB so they survive restarts.
