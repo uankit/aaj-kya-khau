@@ -598,25 +598,50 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
 
     if (state.phase === 'await_confirm') {
       const decision = parseConfirm(message);
-      if (decision === null) {
-        return { text: 'Reply <b>yes</b> to place this order or <b>no</b> to cancel.' };
-      }
       if (decision === 'no') {
         state.phase = 'cancelled';
         trace(state, 'cancelled', 'user declined');
         await save(userId, state, existingTask);
         return { text: 'Cancelled. No order placed 👍', finished: true };
       }
-      state.phase = 'placing';
-      const r = await placeOrder(userId, state, provider);
-      if (!r.ok) {
-        state.phase = 'failed';
+      if (decision === 'yes') {
+        state.phase = 'placing';
+        const r = await placeOrder(userId, state, provider);
+        if (!r.ok) {
+          state.phase = 'failed';
+          await save(userId, state, existingTask);
+          return { text: r.reply ?? 'Order placement failed.', finished: true };
+        }
+        state.phase = 'completed';
         await save(userId, state, existingTask);
-        return { text: r.reply ?? 'Order placement failed.', finished: true };
+        return { text: placedReply(state), finished: true };
       }
-      state.phase = 'completed';
-      await save(userId, state, existingTask);
-      return { text: placedReply(state), finished: true };
+
+      // Neither yes nor no. If the classifier pulled new items, treat this
+      // as an "add to cart" request — append, rebuild the preview, ask again.
+      if (input.orderItems && input.orderItems.length > 0) {
+        state.requests = [...state.requests, ...input.orderItems];
+        trace(
+          state,
+          'preparing_preview',
+          `mid-confirm add: +${input.orderItems.length} items`,
+        );
+        const r = await buildCartAndPreview(userId, state, provider);
+        if (!r.ok) {
+          state.phase = 'failed';
+          await save(userId, state, existingTask);
+          return { text: r.reply ?? 'Could not rebuild preview.', finished: true };
+        }
+        // Stay in await_confirm — show the new preview and wait again.
+        await save(userId, state, existingTask);
+        return { text: presentPreviewReply(state) };
+      }
+
+      return {
+        text:
+          'Reply <b>yes</b> to place, <b>no</b> to cancel, or tell me what else to add ' +
+          '(e.g. <i>add 1 hakka noodles</i>). Removing items isn\'t wired yet — say no and re-order to drop something.',
+      };
     }
 
     log.warn(`fell through phase=${state.phase}`, { userId });
