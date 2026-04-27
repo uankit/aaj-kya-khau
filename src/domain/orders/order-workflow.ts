@@ -23,6 +23,7 @@
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { db } from '../../config/database.js';
 import { agentTasks, users, type AgentTask } from '../../db/schema.js';
+import { classifyOrderAction, type CartLineSummary } from '../../agent/intent.js';
 import {
   type GroceryProvider,
   GroceryProviderError,
@@ -53,6 +54,8 @@ export type Phase =
   | 'cancelled';
 
 export interface CartLineState {
+  /** Index into state.requests this line was built from. Used for line-targeted edits. */
+  requestIndex: number;
   query: string;
   productVariantId: string;
   storeProductId: string;
@@ -199,17 +202,53 @@ function recordError(state: OrderState, phase: Phase, code: string, message: str
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Intent / reply parsing
+// Cart helpers
 // ─────────────────────────────────────────────────────────────────────────
 
-const CONFIRM_RE = /^(yes|y|yep|yeah|confirm|go ahead|order it|place it|do it|haan|haan ji|han|haa|sure|ok|okay|chalo|kar do|mangwa do|manga do|✅)\b/i;
-const CANCEL_RE = /^(no|n|nope|nah|cancel|stop|don'?t|leave it|rehne do|mat karo|nahi|nahin|abort|✗|❌)\b/i;
+function cartSummary(state: OrderState): CartLineSummary[] {
+  return (state.cart ?? []).map((l, i) => ({
+    index: i + 1,
+    name: l.name,
+    quantity: l.quantity,
+    pricePaise: l.pricePaise,
+  }));
+}
 
-function parseConfirm(text: string): 'yes' | 'no' | null {
-  const t = text.trim();
-  if (CONFIRM_RE.test(t)) return 'yes';
-  if (CANCEL_RE.test(t)) return 'no';
-  return null;
+/**
+ * Translate user-visible 1-based cart line numbers (from the LLM action
+ * classifier) into indices in state.requests — which is the source of truth
+ * the rebuild iterates. Lines without a backing cart entry (out of range,
+ * already-unmatched) get silently dropped.
+ */
+function mapTargetLinesToRequestIndices(state: OrderState, targetLines: number[]): number[] {
+  const out: number[] = [];
+  for (const line of targetLines) {
+    const cartLine = state.cart?.[line - 1];
+    if (cartLine && !out.includes(cartLine.requestIndex)) {
+      out.push(cartLine.requestIndex);
+    }
+  }
+  return out;
+}
+
+/**
+ * Rebuild the cart + live preview after a state.requests mutation, save,
+ * and return the new preview reply for the user. Stays in await_confirm.
+ */
+async function rebuildAndPresent(
+  userId: string,
+  state: OrderState,
+  provider: GroceryProvider,
+  existingTask: AgentTask | undefined,
+): Promise<WorkflowReply> {
+  const r = await buildCartAndPreview(userId, state, provider);
+  if (!r.ok) {
+    state.phase = 'failed';
+    await save(userId, state, existingTask);
+    return { text: r.reply ?? 'Could not rebuild preview.', finished: true };
+  }
+  await save(userId, state, existingTask);
+  return { text: presentPreviewReply(state) };
 }
 
 
@@ -359,11 +398,8 @@ function presentAddressChoicesReply(
 }
 
 function parseAddressChoice(text: string, optionCount: number): number | null {
-  const m = text.trim().match(/^(?:option\s*)?(\d+)\b/i);
-  if (!m) return null;
-  const n = Number(m[1]);
-  if (n >= 1 && n <= optionCount) return n;
-  return null;
+  const n = parseInt(text.trim(), 10);
+  return Number.isInteger(n) && n >= 1 && n <= optionCount ? n : null;
 }
 
 async function persistDefaultAddress(userId: string, addressId: string): Promise<void> {
@@ -403,6 +439,7 @@ async function buildCartAndPreview(
       return;
     }
     cart.push({
+      requestIndex: idx,
       query: g.query,
       productVariantId: top.productVariantId,
       storeProductId: top.storeProductId,
@@ -498,17 +535,6 @@ async function placeOrder(
 export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply> {
   const { userId, message } = input;
 
-  // Hard cancel at any point.
-  if (parseConfirm(message) === 'no' && message.trim().length <= 15) {
-    const existing = await load(userId);
-    if (existing) {
-      existing.state.phase = 'cancelled';
-      trace(existing.state, 'cancelled', 'user cancelled');
-      await save(userId, existing.state, existing.task);
-    }
-    return { text: 'Cancelled. No order placed 👍', finished: true };
-  }
-
   const loaded = await load(userId);
   const restart =
     !loaded ||
@@ -597,14 +623,16 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
     }
 
     if (state.phase === 'await_confirm') {
-      const decision = parseConfirm(message);
-      if (decision === 'no') {
+      const action = await classifyOrderAction(message, cartSummary(state));
+
+      if (action.action === 'cancel') {
         state.phase = 'cancelled';
         trace(state, 'cancelled', 'user declined');
         await save(userId, state, existingTask);
         return { text: 'Cancelled. No order placed 👍', finished: true };
       }
-      if (decision === 'yes') {
+
+      if (action.action === 'confirm') {
         state.phase = 'placing';
         const r = await placeOrder(userId, state, provider);
         if (!r.ok) {
@@ -617,30 +645,71 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
         return { text: placedReply(state), finished: true };
       }
 
-      // Neither yes nor no. If the classifier pulled new items, treat this
-      // as an "add to cart" request — append, rebuild the preview, ask again.
-      if (input.orderItems && input.orderItems.length > 0) {
-        state.requests = [...state.requests, ...input.orderItems];
-        trace(
-          state,
-          'preparing_preview',
-          `mid-confirm add: +${input.orderItems.length} items`,
-        );
-        const r = await buildCartAndPreview(userId, state, provider);
-        if (!r.ok) {
-          state.phase = 'failed';
-          await save(userId, state, existingTask);
-          return { text: r.reply ?? 'Could not rebuild preview.', finished: true };
-        }
-        // Stay in await_confirm — show the new preview and wait again.
-        await save(userId, state, existingTask);
-        return { text: presentPreviewReply(state) };
+      if (action.action === 'add') {
+        state.requests = [...state.requests, ...action.items];
+        trace(state, 'await_confirm', `add: +${action.items.length} items`);
+        return rebuildAndPresent(userId, state, provider, existingTask);
       }
 
+      if (action.action === 'remove') {
+        const requestIndices = mapTargetLinesToRequestIndices(state, action.targetLines);
+        if (requestIndices.length === 0) {
+          return {
+            text: 'I couldn\'t map that to a cart line. Mention the item name or its number from the list.',
+          };
+        }
+        state.requests = state.requests.filter((_, i) => !requestIndices.includes(i));
+        if (state.requests.length === 0) {
+          state.phase = 'cancelled';
+          trace(state, 'cancelled', 'all lines removed');
+          await save(userId, state, existingTask);
+          return {
+            text: 'Cart is empty now. Tell me what to order when you\'re ready.',
+            finished: true,
+          };
+        }
+        trace(state, 'await_confirm', `remove: ${action.targetLines.join(',')}`);
+        return rebuildAndPresent(userId, state, provider, existingTask);
+      }
+
+      if (action.action === 'set_quantity') {
+        let zeroedAll = true;
+        const toRemove = new Set<number>();
+        for (const change of action.changes) {
+          const cartIdx = change.lineIndex - 1;
+          const cartLine = state.cart?.[cartIdx];
+          if (!cartLine) continue;
+          if (change.quantity === 0) {
+            toRemove.add(cartLine.requestIndex);
+          } else {
+            const req = state.requests[cartLine.requestIndex];
+            if (req) {
+              req.quantity = change.quantity;
+              zeroedAll = false;
+            }
+          }
+        }
+        if (toRemove.size > 0) {
+          state.requests = state.requests.filter((_, i) => !toRemove.has(i));
+        }
+        if (state.requests.length === 0 && zeroedAll) {
+          state.phase = 'cancelled';
+          trace(state, 'cancelled', 'all qty set to 0');
+          await save(userId, state, existingTask);
+          return {
+            text: 'Cart is empty now. Tell me what to order when you\'re ready.',
+            finished: true,
+          };
+        }
+        trace(state, 'await_confirm', `set_quantity changes=${action.changes.length}`);
+        return rebuildAndPresent(userId, state, provider, existingTask);
+      }
+
+      // noop — gentle re-prompt without forcing a script.
       return {
         text:
-          'Reply <b>yes</b> to place, <b>no</b> to cancel, or tell me what else to add ' +
-          '(e.g. <i>add 1 hakka noodles</i>). Removing items isn\'t wired yet — say no and re-order to drop something.',
+          'Reply <b>yes</b> to place, <b>no</b> to cancel, or tell me to add / remove items ' +
+          '(e.g. <i>add 1 hakka noodles</i>, <i>drop the chips</i>, <i>make it 2 ice creams</i>).',
       };
     }
 

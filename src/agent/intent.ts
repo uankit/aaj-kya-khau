@@ -134,3 +134,111 @@ export async function classifyIntent(
     return { intent: 'cook' };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Mid-confirm order action classifier.
+//
+// When the order workflow is in await_confirm and the user types something,
+// we need to know whether they meant: confirm, cancel, add new items,
+// remove existing line(s), change a line's quantity, or just chitchat.
+//
+// Regex can't disambiguate ("blue lays" appears in add and remove the same
+// way), so the cart context is fed into the LLM and it returns a typed
+// discriminated union. Callers branch on `action`.
+// ─────────────────────────────────────────────────────────────────────────
+
+const orderItemSchema = z.object({
+  query: z.string().min(1),
+  quantity: z.number().int().positive().default(1),
+});
+
+const orderActionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('confirm') }),
+  z.object({ action: z.literal('cancel') }),
+  z.object({
+    action: z.literal('add'),
+    items: z.array(orderItemSchema).min(1),
+  }),
+  z.object({
+    action: z.literal('remove'),
+    /** 1-based cart line numbers as shown to the user. */
+    targetLines: z.array(z.number().int().positive()).min(1),
+  }),
+  z.object({
+    action: z.literal('set_quantity'),
+    changes: z
+      .array(
+        z.object({
+          lineIndex: z.number().int().positive(),
+          quantity: z.number().int().nonnegative(),
+        }),
+      )
+      .min(1),
+  }),
+  /** User said something unrelated to the order — re-prompt. */
+  z.object({ action: z.literal('noop') }),
+]);
+
+export type OrderAction = z.infer<typeof orderActionSchema>;
+
+export interface CartLineSummary {
+  /** 1-based, matches what the user sees in the preview. */
+  index: number;
+  name: string;
+  quantity: number;
+  pricePaise: number;
+}
+
+const ORDER_ACTION_SYSTEM = `You decide what a user wants to do while staring at their pre-confirmation cart preview. Return exactly ONE action:
+
+- confirm: yes / haan / chalo / go ahead / place it / ✅
+- cancel: no / nahi / abort / cancel / stop / ✗
+- add: user wants NEW items added. Return items[] with {query, quantity}.
+- remove: user wants existing line(s) dropped. Return targetLines[] of 1-based line numbers from the cart.
+- set_quantity: user wants a line's quantity changed. Return changes[] with {lineIndex, quantity}. quantity=0 is equivalent to remove. Use the CURRENT cart quantity to interpret "double", "half", "make it 5", etc.
+- noop: unrelated chat the bot should ignore.
+
+Cart line references (for remove / set_quantity): map fuzzy phrasing to the line number.
+- "remove blue lays" / "drop the chips" / "take off the lays" → match by product name → that line's index
+- "remove the first one" / "drop #2" → numeric reference → that index
+- "make it 2 ice creams" → set_quantity, lineIndex=ice cream's number, quantity=2
+- "double the chips" → set_quantity, current qty × 2
+
+When the user mentions products NOT currently in the cart, treat as 'add'.
+
+Be tolerant of mixed languages (Hindi/Hinglish/English) and casual phrasing. Default to 'noop' only when truly ambiguous — never fabricate cart lines that don't exist.`;
+
+export async function classifyOrderAction(
+  message: string,
+  cart: CartLineSummary[],
+): Promise<OrderAction> {
+  const text = message.trim();
+  if (text.length === 0) return { action: 'noop' };
+
+  const cartBlock =
+    cart.length === 0
+      ? '(cart is empty)'
+      : cart
+          .map(
+            (l) =>
+              `${l.index}. ${l.name} × ${l.quantity}` +
+              (l.pricePaise ? ` (₹${(l.pricePaise / 100).toFixed(0)} each)` : ''),
+          )
+          .join('\n');
+
+  try {
+    const { object } = await generateObject({
+      model,
+      schema: orderActionSchema,
+      system: ORDER_ACTION_SYSTEM,
+      prompt: `CURRENT CART:\n${cartBlock}\n\nUSER MESSAGE: ${text}`,
+      temperature: 0,
+      abortSignal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
+    });
+    log.debug(`order action=${object.action} "${text.slice(0, 60)}"`);
+    return object;
+  } catch (err) {
+    log.warn('Order action classify failed; defaulting to noop', err);
+    return { action: 'noop' };
+  }
+}
