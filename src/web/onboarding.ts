@@ -1,5 +1,5 @@
 /**
- * Onboarding API — profile, schedule, surface bind, complete.
+ * Onboarding API — profile, schedule, Telegram bind, complete.
  *
  * All routes require an authenticated user (loaded via auth-middleware).
  */
@@ -47,10 +47,6 @@ const DEFAULT_MEALS = [
 ];
 const DEFAULT_NIGHTLY = '22:00';
 
-const bindSchema = z.object({
-  surface: z.enum(['telegram']),
-});
-
 function bindTokenString(): string {
   // 16 chars base32-ish, easy to type, hard to guess.
   return randomBytes(12).toString('base64url');
@@ -69,7 +65,7 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
       dietType: u.dietType,
       timezone: u.timezone,
       onboardingComplete: u.onboardingComplete,
-      primarySurface: u.primarySurface,
+      telegramConnected: u.telegramId !== null,
       nightlySummaryAt: u.nightlySummaryAt,
       zeptoConnected,
     });
@@ -125,28 +121,20 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true, mealsCount: meals.length });
   });
 
-  // POST /api/me/bind/start — mint a one-time token + return deep link.
+  // POST /api/me/bind/start — mint a one-time token + return Telegram deep link.
   app.post('/api/me/bind/start', { preHandler: requireAuth }, async (request, reply) => {
-    const parsed = bindSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'invalid' });
     const u = request.user!;
     const token = bindTokenString();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-    await db.insert(bindTokens).values({
-      token,
-      userId: u.id,
-      surface: parsed.data.surface,
-      expiresAt,
-    });
+    await db.insert(bindTokens).values({ token, userId: u.id, expiresAt });
 
     const base = env.PUBLIC_BASE_URL ?? `http://${request.headers.host ?? 'localhost:3000'}`;
-    // /start payload — Telegram passes it as the first /start arg.
     const botUsername = await resolveTelegramBotUsername();
     const deepLink = botUsername
       ? `https://t.me/${botUsername}?start=${token}`
       : `${base}/api/bind/telegram-help?token=${token}`;
 
-    log.info(`bind token issued for user=${u.id} surface=${parsed.data.surface}`);
+    log.info(`bind token issued for user=${u.id}`);
     return reply.send({ token, deepLink, expiresAt });
   });
 

@@ -78,6 +78,13 @@
       "when": 1777318944071,
       "tag": "0010_bent_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777319410426,
+      "tag": "0011_deep_hitman",
+      "breakpoints": true
     }
   ]
 }

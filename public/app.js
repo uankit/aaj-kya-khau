@@ -56,7 +56,7 @@
     // (always set) as not a signal — instead, schedule is one-shot, never blocking.
     // We always show it once until onboardingComplete is true.
     if (!me.zeptoConnected) return show('zepto');
-    if (!me.primarySurface) return show('surface');
+    if (!me.telegramConnected) return show('surface');
     if (!me.onboardingComplete) return show('done');
     return show('done');
   }
@@ -171,10 +171,7 @@
   async function loadSurfaceStep() {
     if (surfaceLoaded) return;
     surfaceLoaded = true;
-    const res = await api('/api/me/bind/start', {
-      method: 'POST',
-      body: JSON.stringify({ surface: 'telegram' }),
-    });
+    const res = await api('/api/me/bind/start', { method: 'POST' });
     if (!res.ok) {
       alert('Could not generate the Telegram link. Refresh and try again.');
       return;

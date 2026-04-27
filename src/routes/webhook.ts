@@ -180,7 +180,7 @@ async function processMessage(incoming: IncomingMessage): Promise<void> {
   // user — once binding succeeds, the user already exists.
   const bindToken = extractTelegramBindToken(incoming.body);
   if (bindToken) {
-    const result = await consumeBindToken(bindToken, 'telegram', incoming.telegramId);
+    const result = await consumeBindToken(bindToken, incoming.telegramId);
     if (result) {
       const greeting = result.fresh
         ? `Hi ${escapeUserName(result.user.name)} 👋 You're all set on Telegram. What can I do?`

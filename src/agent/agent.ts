@@ -16,9 +16,9 @@
  */
 
 import { generateText, type CoreMessage } from 'ai';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { messages, surfaceBindings, users } from '../db/schema.js';
+import { messages, users } from '../db/schema.js';
 import { model } from '../llm/client.js';
 import { sendHtml } from '../surfaces/telegram/index.js';
 import { parseAndSaveInvoice } from '../domain/orders/invoice.js';
@@ -335,14 +335,14 @@ function sleep(ms: number): Promise<void> {
  * history will have a one-turn gap which is much better than a double text.
  */
 async function sendAndPersist(userId: string, text: string): Promise<void> {
-  const target = await resolveOutboundTarget(userId);
-  if (!target) {
-    log.warn(`Cannot send — user ${userId} has no bound surface`);
+  const telegramId = await resolveTelegramId(userId);
+  if (!telegramId) {
+    log.warn(`Cannot send — user ${userId} has not bound Telegram yet`);
     return;
   }
 
   try {
-    await sendHtml(target.externalId, text);
+    await sendHtml(telegramId, text);
   } catch (err) {
     log.error(`outbound send failed for user=${userId}`, err);
     return; // don't persist if the user never got the message
@@ -359,32 +359,11 @@ async function sendAndPersist(userId: string, text: string): Promise<void> {
   }
 }
 
-/**
- * Resolve where to send a user's reply. Prefers the user's primary_surface
- * (set on first bind), falls back to whatever binding exists. For legacy
- * users with telegram_id but no surface_bindings row yet, falls back to the
- * column directly.
- */
-async function resolveOutboundTarget(
-  userId: string,
-): Promise<{ surface: 'telegram'; externalId: string } | null> {
+async function resolveTelegramId(userId: string): Promise<string | null> {
   const user = await db.query.users.findFirst({
     where: eq(users.id, userId),
     columns: { telegramId: true },
   });
-  if (!user) return null;
-
-  // Prefer the active telegram binding; fall back to the legacy
-  // users.telegram_id column for pre-migration users.
-  const [binding] = await db
-    .select({ externalId: surfaceBindings.externalId })
-    .from(surfaceBindings)
-    .where(
-      and(eq(surfaceBindings.userId, userId), eq(surfaceBindings.surface, 'telegram')),
-    )
-    .limit(1);
-  if (binding) return { surface: 'telegram', externalId: binding.externalId };
-  if (user.telegramId) return { surface: 'telegram', externalId: user.telegramId };
-  return null;
+  return user?.telegramId ?? null;
 }
 
