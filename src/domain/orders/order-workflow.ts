@@ -234,6 +234,51 @@ function recordError(state: OrderState, phase: Phase, code: string, message: str
 // Cart helpers
 // ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * Translate provider error strings into something a user can act on.
+ * Substring matches only (not interpretation) — Zepto's MCP returns
+ * stable error tokens like STORE_CLOSED, NOT_SERVICEABLE, etc. that we
+ * can recognize without an LLM hop.
+ */
+function friendlyProviderError(rawMessage: string, fallback: string): string {
+  const m = rawMessage.toLowerCase();
+  if (m.includes('store_closed') || m.includes('store closed')) {
+    return (
+      'The Zepto store serving your address is closed right now. ' +
+      'Try again later, or pick a different address.'
+    );
+  }
+  if (
+    m.includes('not deliverable') ||
+    m.includes('not_deliverable') ||
+    m.includes('unserviceable') ||
+    m.includes('not_serviceable')
+  ) {
+    return (
+      'Zepto can\'t deliver to your address right now. ' +
+      'Try a different saved address.'
+    );
+  }
+  if (
+    m.includes('out of stock') ||
+    m.includes('out_of_stock') ||
+    m.includes('not_available') ||
+    m.includes('unavailable')
+  ) {
+    return 'Some items just went out of stock on Zepto. Try again or swap them.';
+  }
+  if (m.includes('rate limit') || m.includes('too many requests') || m.includes('429')) {
+    return 'Zepto is rate-limiting us — try again in a minute 🙏';
+  }
+  if (m.includes('timeout') || m.includes('timed out') || m.includes('econnreset')) {
+    return 'Zepto didn\'t respond in time. Try again in a moment.';
+  }
+  if (m.includes('not_connected') || m.includes('not connected')) {
+    return 'Zepto session expired. Reconnect at aajkyakhaun.com/app.';
+  }
+  return fallback;
+}
+
 function cartSummary(state: OrderState): CartLineSummary[] {
   return (state.cart ?? []).map((l, i) => ({
     index: i + 1,
@@ -667,7 +712,13 @@ async function assemblePreview(
   } catch (err) {
     if (err instanceof GroceryProviderError) {
       recordError(state, 'preparing_preview', 'preview_failed', err.message);
-      return { ok: false, reply: `Couldn't price the cart: ${escapeHtml(err.message)}` };
+      return {
+        ok: false,
+        reply: friendlyProviderError(
+          err.message,
+          'Couldn\'t price the cart right now. Try again in a moment 🙏',
+        ),
+      };
     }
     throw err;
   }
@@ -724,7 +775,13 @@ async function placeOrder(
   } catch (err) {
     if (err instanceof GroceryProviderError) {
       recordError(state, 'placing', 'place_failed', err.message);
-      return { ok: false, reply: `Order placement failed: ${escapeHtml(err.message)}` };
+      return {
+        ok: false,
+        reply: friendlyProviderError(
+          err.message,
+          'Couldn\'t place the order right now. Try again in a moment 🙏',
+        ),
+      };
     }
     throw err;
   }
