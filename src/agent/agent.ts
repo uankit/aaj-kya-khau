@@ -26,7 +26,7 @@ import { loadContext } from './context.js';
 import { buildSystemPrompt, type TurnTrigger } from './system-prompt.js';
 import { buildTools } from './tools.js';
 import { classifyIntent, type Intent } from './intent.js';
-import { runOrderTurn } from '../workflows/zepto-order.js';
+import { runOrderTurn } from '../domain/orders/order-workflow.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('agent');
