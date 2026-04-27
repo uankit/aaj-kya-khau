@@ -175,6 +175,8 @@ const orderActionInnerSchema = z.discriminatedUnion('action', [
       )
       .min(1),
   }),
+  /** User wants to deliver to a different saved address. */
+  z.object({ action: z.literal('change_address') }),
   /** User said something unrelated to the order — re-prompt. */
   z.object({ action: z.literal('noop') }),
 ]);
@@ -197,6 +199,7 @@ const ORDER_ACTION_SYSTEM = `You decide what a user wants to do while staring at
 - add: user wants NEW items added. Return items[] with {query, quantity}.
 - remove: user wants existing line(s) dropped. Return targetLines[] of 1-based line numbers from the cart.
 - set_quantity: user wants a line's quantity changed. Return changes[] with {lineIndex, quantity}. quantity=0 is equivalent to remove. Use the CURRENT cart quantity to interpret "double", "half", "make it 5", etc.
+- change_address: user wants delivery to a DIFFERENT saved address ("deliver at home", "use the office one", "change address", "different location", "send it to home instead"). The bot shows them their saved addresses to pick from.
 - noop: unrelated chat the bot should ignore.
 
 Cart line references (for remove / set_quantity): map fuzzy phrasing to the line number.

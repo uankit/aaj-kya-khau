@@ -118,6 +118,14 @@ export interface OrderState {
   resolvedProducts?: Record<number, ResolvedProduct>;
   /** Queue of ambiguous queries waiting on the user. Front is the active one. */
   pendingChoices?: PendingChoice[];
+  /**
+   * When the user picks an address in await_address_choice, persist it as
+   * users.default_zepto_address_id only if this flag is true. First-time
+   * picks set it true; one-time overrides (change_address mid-flow,
+   * serviceability fallbacks) set it false so the permanent default isn't
+   * clobbered by a transient choice.
+   */
+  savePickAsDefault?: boolean;
   unmatchedQueries: string[];
   address?: AddressState;
   cart?: CartLineState[];
@@ -279,6 +287,63 @@ function friendlyProviderError(rawMessage: string, fallback: string): string {
   return fallback;
 }
 
+/**
+ * True if the provider's error message indicates an address-related
+ * failure that the user can resolve by picking a different address.
+ */
+function isServiceabilityError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes('store_closed') ||
+    m.includes('store closed') ||
+    m.includes('not deliverable') ||
+    m.includes('not_deliverable') ||
+    m.includes('unserviceable') ||
+    m.includes('not_serviceable')
+  );
+}
+
+/**
+ * Pivot a stuck order into the address picker without losing the cart.
+ * Used both when:
+ *   - The user explicitly says "deliver elsewhere" (change_address action)
+ *   - A preview/place fails with a serviceability error
+ *
+ * The chosen address is treated as a one-time override for THIS order:
+ * we never overwrite users.default_zepto_address_id from this path.
+ */
+async function offerAddressChange(
+  userId: string,
+  state: OrderState,
+  provider: GroceryProvider,
+  existingTask: AgentTask | undefined,
+  prefaceReply: string,
+): Promise<WorkflowReply> {
+  const addresses = await provider.listAddresses(userId);
+  if (addresses.length <= 1) {
+    state.phase = 'failed';
+    await save(userId, state, existingTask);
+    return {
+      text:
+        prefaceReply +
+        '\n\n(No alternative addresses on Zepto — open the Zepto app to add one, then come back.)',
+      finished: true,
+    };
+  }
+  const choices = addresses.slice(0, MAX_ADDRESS_CHOICES);
+  state.addressChoices = choices.map((a) => ({ id: a.id, label: a.label }));
+  state.savePickAsDefault = false; // one-time override, not a default change
+  state.address = undefined;
+  state.phase = 'await_address_choice';
+  trace(state, 'await_address_choice', `offering change among ${choices.length}`);
+  await save(userId, state, existingTask);
+  return {
+    text:
+      (prefaceReply ? prefaceReply + '\n\n' : '') +
+      presentAddressChoicesReply(choices, addresses.length),
+  };
+}
+
 function cartSummary(state: OrderState): CartLineSummary[] {
   return (state.cart ?? []).map((l, i) => ({
     index: i + 1,
@@ -318,6 +383,17 @@ async function rebuildAndPresent(
 ): Promise<WorkflowReply> {
   const r = await buildCartAndPreview(userId, state, provider);
   if (!r.ok) {
+    if (r.serviceability) {
+      // Cart is fine; the address isn't. Pivot to the picker without
+      // killing the workflow.
+      return offerAddressChange(
+        userId,
+        state,
+        provider,
+        existingTask,
+        r.reply ?? 'That address isn\'t serviceable right now.',
+      );
+    }
     state.phase = 'failed';
     await save(userId, state, existingTask);
     return { text: r.reply ?? 'Could not rebuild preview.', finished: true };
@@ -328,10 +404,13 @@ async function rebuildAndPresent(
     return { text: presentLineChoiceReply(state) };
   }
   if (state.preview && !state.preview.deliverable) {
-    state.phase = 'failed';
-    recordError(state, 'preparing_preview', 'unserviceable', 'preview deliverable=false');
-    await save(userId, state, existingTask);
-    return { text: presentUnserviceableReply(state), finished: true };
+    return offerAddressChange(
+      userId,
+      state,
+      provider,
+      existingTask,
+      presentUnserviceableReply(state),
+    );
   }
   state.phase = 'await_confirm';
   await save(userId, state, existingTask);
@@ -487,10 +566,12 @@ async function ensureAddress(
     return { kind: 'resolved' };
   }
 
-  // Path 3: multiple addresses, no saved default — present picker.
+  // Path 3: multiple addresses, no saved default — present picker. This is
+  // a first-time pick, so we WILL persist the choice as the user's default.
   const choices = addresses.slice(0, MAX_ADDRESS_CHOICES);
   state.addressChoices = choices.map((a) => ({ id: a.id, label: a.label }));
-  trace(state, 'await_address_choice', `presenting ${choices.length} options`);
+  state.savePickAsDefault = true;
+  trace(state, 'await_address_choice', `presenting ${choices.length} options (first time)`);
   return {
     kind: 'awaiting',
     reply: presentAddressChoicesReply(choices, addresses.length),
@@ -664,7 +745,7 @@ async function assemblePreview(
   userId: string,
   state: OrderState,
   provider: GroceryProvider,
-): Promise<{ ok: boolean; reply?: string }> {
+): Promise<{ ok: boolean; reply?: string; serviceability?: boolean }> {
   const resolved = state.resolvedProducts ?? {};
   const cart: CartLineState[] = [];
   state.requests.forEach((req, idx) => {
@@ -714,6 +795,7 @@ async function assemblePreview(
       recordError(state, 'preparing_preview', 'preview_failed', err.message);
       return {
         ok: false,
+        serviceability: isServiceabilityError(err.message),
         reply: friendlyProviderError(
           err.message,
           'Couldn\'t price the cart right now. Try again in a moment 🙏',
@@ -745,7 +827,12 @@ async function buildCartAndPreview(
   userId: string,
   state: OrderState,
   provider: GroceryProvider,
-): Promise<{ ok: boolean; reply?: string; needsChoice?: boolean }> {
+): Promise<{
+  ok: boolean;
+  reply?: string;
+  needsChoice?: boolean;
+  serviceability?: boolean;
+}> {
   const search = await searchAndDisambiguate(userId, state, provider);
   if (!search.ok) return search;
   if ((state.pendingChoices ?? []).length > 0) {
@@ -758,7 +845,7 @@ async function placeOrder(
   userId: string,
   state: OrderState,
   provider: GroceryProvider,
-): Promise<{ ok: boolean; reply?: string }> {
+): Promise<{ ok: boolean; reply?: string; serviceability?: boolean }> {
   if (!state.address?.id) {
     recordError(state, 'placing', 'no_address', 'address missing at place time');
     return { ok: false, reply: "Lost track of your delivery address — start over please." };
@@ -777,6 +864,7 @@ async function placeOrder(
       recordError(state, 'placing', 'place_failed', err.message);
       return {
         ok: false,
+        serviceability: isServiceabilityError(err.message),
         reply: friendlyProviderError(
           err.message,
           'Couldn\'t place the order right now. Try again in a moment 🙏',
@@ -862,8 +950,14 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
       await provider.selectAddress(userId, chosen.id);
       state.address = chosen;
       state.addressChoices = undefined;
-      await persistDefaultAddress(userId, chosen.id);
-      trace(state, 'await_address_choice', `picked ${chosen.id}; saved as default`);
+      const persisted = state.savePickAsDefault === true;
+      if (persisted) await persistDefaultAddress(userId, chosen.id);
+      state.savePickAsDefault = undefined;
+      trace(
+        state,
+        'await_address_choice',
+        `picked ${chosen.id}${persisted ? ' (saved as default)' : ' (one-time)'}`,
+      );
       state.phase = 'preparing_preview';
       // Fall through to preparing_preview on the same turn — better UX than
       // making the user wait another round-trip just to see the cart.
@@ -922,15 +1016,27 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
       // All resolved — assemble cart + preview.
       const r = await assemblePreview(userId, state, provider);
       if (!r.ok) {
+        if (r.serviceability) {
+          return offerAddressChange(
+            userId,
+            state,
+            provider,
+            existingTask,
+            r.reply ?? 'That address isn\'t serviceable right now.',
+          );
+        }
         state.phase = 'failed';
         await save(userId, state, existingTask);
         return { text: r.reply ?? 'Could not price the cart.', finished: true };
       }
       if (state.preview && !state.preview.deliverable) {
-        state.phase = 'failed';
-        recordError(state, 'preparing_preview', 'unserviceable', 'preview deliverable=false');
-        await save(userId, state, existingTask);
-        return { text: presentUnserviceableReply(state), finished: true };
+        return offerAddressChange(
+          userId,
+          state,
+          provider,
+          existingTask,
+          presentUnserviceableReply(state),
+        );
       }
       state.phase = 'await_confirm';
       await save(userId, state, existingTask);
@@ -951,6 +1057,15 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
         state.phase = 'placing';
         const r = await placeOrder(userId, state, provider);
         if (!r.ok) {
+          if (r.serviceability) {
+            return offerAddressChange(
+              userId,
+              state,
+              provider,
+              existingTask,
+              r.reply ?? 'That address isn\'t serviceable right now.',
+            );
+          }
           state.phase = 'failed';
           await save(userId, state, existingTask);
           return { text: r.reply ?? 'Order placement failed.', finished: true };
@@ -958,6 +1073,16 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
         state.phase = 'completed';
         await save(userId, state, existingTask);
         return { text: placedReply(state), finished: true };
+      }
+
+      if (action.action === 'change_address') {
+        return offerAddressChange(
+          userId,
+          state,
+          provider,
+          existingTask,
+          'Sure — pick a different address for this order:',
+        );
       }
 
       if (action.action === 'add') {
