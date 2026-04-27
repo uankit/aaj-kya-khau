@@ -33,7 +33,7 @@ const log = createLogger('agent');
 
 // The LLM handles cook / pantry / track / config / chitchat intents via
 // the static tools in tools.ts. Zepto ordering is OWNED by the workflow
-// in src/workflows/zepto-order.ts — the LLM never calls zepto_* tools.
+// in src/domain/orders/order-workflow.ts — the LLM never calls zepto_* tools.
 // 3-4 steps is plenty for the non-ordering cases; 5 leaves headroom.
 const MAX_TOOL_STEPS = 5;
 // LLM hard ceiling. GPT-4o usually answers in <5s; anything over 30s is hung.

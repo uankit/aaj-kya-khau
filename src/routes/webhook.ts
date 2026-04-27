@@ -15,8 +15,7 @@ import { db } from '../config/database.js';
 import { webhookDedup } from '../db/schema.js';
 import { bot, parseIncoming, sendHtml, sendText, type IncomingMessage } from '../surfaces/telegram/index.js';
 import { consumeBindToken, extractTelegramBindToken } from '../domain/identity/bind.js';
-import { getOrCreateUserByTelegramId } from '../services/user.js';
-import { handleOnboardingMessage, sendCurrentPrompt } from '../onboarding/flow.js';
+import { findUserByTelegramId } from '../services/user.js';
 import { handleTurn } from '../agent/agent.js';
 import { tryHandleCommand } from '../commands/handlers.js';
 import { createLogger } from '../utils/logger.js';
@@ -195,27 +194,22 @@ async function processMessage(incoming: IncomingMessage): Promise<void> {
     // typo / expired link still get a useful response.
   }
 
-  const { user, created } = await getOrCreateUserByTelegramId(incoming.telegramId);
-
-  // Short-circuit specific slash commands (/start, /help, /mute, /feedback).
-  // Everything else falls through — the LLM agent handles /hungry, /kitchen,
-  // /ate, /today, /schedule, /profile via natural language + tool calls.
-  const commandHandled = await tryHandleCommand(incoming.body, { user, created });
-  if (commandHandled) return;
-
-  if (!user.onboardingComplete) {
-    if (created) {
-      log.info(`New user ${user.telegramId} — sending welcome prompt`);
-      await sendCurrentPrompt(user);
-      return;
-    }
-
-    const finished = await handleOnboardingMessage(user, incoming.body);
-    if (finished) {
-      log.info(`User ${user.telegramId} just finished onboarding`);
-    }
+  const user = await findUserByTelegramId(incoming.telegramId);
+  if (!user) {
+    // No bind, no legacy account. Onboarding is web-first now.
+    await sendHtml(
+      incoming.telegramId,
+      'Hi! I don\'t recognize this chat yet.\n\n' +
+        'Sign up at <a href="https://aajkyakhaun.com/start">aajkyakhaun.com/start</a>, ' +
+        'finish setup, then click the Telegram link at the end to connect this chat.',
+    );
     return;
   }
+
+  // Short-circuit specific slash commands (/start, /help, /mute, /feedback).
+  // Everything else falls through to the LLM agent.
+  const commandHandled = await tryHandleCommand(incoming.body, { user, created: false });
+  if (commandHandled) return;
 
   await handleTurn(user.id, {
     type: 'message',

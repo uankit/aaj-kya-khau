@@ -33,7 +33,6 @@ import { encrypt } from '../utils/crypto.js';
 import { env } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/html.js';
-import { sendCurrentPrompt } from '../onboarding/flow.js';
 
 const log = createLogger('commands');
 
@@ -120,18 +119,19 @@ export async function tryHandleCommand(text: string, ctx: CommandContext): Promi
 }
 
 async function handleStart(ctx: CommandContext): Promise<boolean> {
-  const { user, created } = ctx;
+  const { user } = ctx;
 
-  // Brand-new user — fall through, webhook will send onboarding welcome
-  if (created) return false;
-
-  // Mid-onboarding — fall through, handleOnboardingMessage will resend
+  // Mid-onboarding (legacy users who never finished). Web is now the
+  // single onboarding surface — point them there.
   if (!user.onboardingComplete) {
-    await sendCurrentPrompt(user);
+    await sendHtml(
+      user.telegramId!,
+      'Looks like setup isn\'t finished. Head to ' +
+        '<a href="https://aajkyakhaun.com/start">aajkyakhaun.com/start</a> to wrap it up.',
+    );
     return true;
   }
 
-  // Returning onboarded user — show friendly welcome-back menu
   await sendHtml(user.telegramId!, welcomeBackText(user.name), {
     inlineKeyboard: MAIN_MENU_KEYBOARD,
   });

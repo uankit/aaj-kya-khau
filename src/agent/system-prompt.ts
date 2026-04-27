@@ -80,7 +80,7 @@ const TRACK_RULES = `TRACKING / NUTRITION RULES:
  * Ordering note injected on cook / pantry turns so the LLM knows Zepto
  * exists and can nudge the user when a recipe needs a missing ingredient.
  * The LLM does NOT handle the order flow itself — the deterministic
- * workflow in src/workflows/zepto-order.ts owns that.
+ * workflow in src/domain/orders/order-workflow.ts owns that.
  */
 const ORDERING_HANDOFF = `ORDERING AVAILABLE: The user has connected Zepto. If a meal they want needs an ingredient they don't have, you MAY mention they can ask you to order it — but you do NOT place orders yourself. Simply suggest "want me to order some from Zepto?" and let the user say yes. A separate workflow handles the actual ordering; you'll see them return with a confirmation or an error.`;
 

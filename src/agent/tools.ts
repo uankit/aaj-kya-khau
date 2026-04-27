@@ -62,7 +62,7 @@ function includeTool(name: string, intent: Intent): boolean {
 
 export async function buildTools(userId: string, intent: Intent = 'cook') {
   // Zepto ordering is handled by the deterministic workflow in
-  // src/workflows/zepto-order.ts — the LLM never sees zepto_* tools.
+  // src/domain/orders/order-workflow.ts — the LLM never sees zepto_* tools.
   const allStatic = {
     add_inventory_item: tool({
       description:
