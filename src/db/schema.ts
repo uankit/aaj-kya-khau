@@ -51,7 +51,7 @@ export const activityLevelEnum = pgEnum('activity_level', [
 
 export const healthGoalEnum = pgEnum('health_goal', ['lose', 'maintain', 'gain']);
 
-export const surfaceEnum = pgEnum('surface', ['telegram', 'whatsapp']);
+export const surfaceEnum = pgEnum('surface', ['telegram']);
 
 /* ------------------------------------------------------------------ */
 /* users                                                              */

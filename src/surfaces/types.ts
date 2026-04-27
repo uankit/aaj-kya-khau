@@ -8,11 +8,7 @@
  * too much to be worth abstracting before WhatsApp is wired.
  */
 
-/**
- * Live chat surfaces. The DB enum (db/schema.ts: surfaceEnum) carries
- * 'telegram' and 'whatsapp' for migration safety, but only telegram is
- * runtime-supported. Add new surfaces here once their adapter ships.
- */
+/** Live chat surfaces. Add new entries once their adapter ships. */
 export type SurfaceName = 'telegram';
 
 /** Surface-agnostic outbound message. Adapters lower into native form. */

@@ -71,6 +71,13 @@
       "when": 1777311332561,
       "tag": "0009_chemical_blue_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777318944071,
+      "tag": "0010_bent_demogoblin",
+      "breakpoints": true
     }
   ]
 }
