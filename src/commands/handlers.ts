@@ -132,7 +132,7 @@ async function handleStart(ctx: CommandContext): Promise<boolean> {
   }
 
   // Returning onboarded user — show friendly welcome-back menu
-  await sendHtml(user.telegramId, welcomeBackText(user.name), {
+  await sendHtml(user.telegramId!, welcomeBackText(user.name), {
     inlineKeyboard: MAIN_MENU_KEYBOARD,
   });
   log.info(`/start returning user ${user.telegramId}`);
@@ -140,7 +140,7 @@ async function handleStart(ctx: CommandContext): Promise<boolean> {
 }
 
 async function handleHelp(ctx: CommandContext): Promise<boolean> {
-  await sendHtml(ctx.user.telegramId, HELP_TEXT, { inlineKeyboard: MAIN_MENU_KEYBOARD });
+  await sendHtml(ctx.user.telegramId!, HELP_TEXT, { inlineKeyboard: MAIN_MENU_KEYBOARD });
   log.info(`/help sent to ${ctx.user.telegramId}`);
   return true;
 }
@@ -167,7 +167,7 @@ async function handleMute(ctx: CommandContext): Promise<boolean> {
   unregisterNightlyCron(user.id);
 
   await sendHtml(
-    user.telegramId,
+    user.telegramId!,
     `🤫 <b>All reminders paused.</b>
 
 Just say something like <code>remind me for breakfast at 9</code> or use <b>/schedule</b> to turn them back on whenever.`,
@@ -181,7 +181,7 @@ async function handleConnectZepto(ctx: CommandContext): Promise<boolean> {
 
   if (!env.ZEPTO_CLIENT_ID || !env.ENCRYPTION_KEY) {
     await sendHtml(
-      user.telegramId,
+      user.telegramId!,
       `Zepto connection isn't configured on the server yet. Hang tight 🛒`,
     );
     log.warn(`/connect_zepto requested by ${user.telegramId} but env not fully configured`);
@@ -219,7 +219,7 @@ async function handleConnectZepto(ctx: CommandContext): Promise<boolean> {
   });
 
   await sendHtml(
-    user.telegramId,
+    user.telegramId!,
     `<b>Let's link your Zepto account</b> 🛒
 
 1. Tap this link to approve:
@@ -246,7 +246,7 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
   const code = parts[1];
   if (!code) {
     await sendHtml(
-      user.telegramId,
+      user.telegramId!,
       `Send the code like this:\n\n<code>/zepto_code YOUR_CODE_HERE</code>`,
     );
     return true;
@@ -254,7 +254,7 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
 
   if (!env.ZEPTO_CLIENT_ID || !env.ENCRYPTION_KEY) {
     await sendHtml(
-      user.telegramId,
+      user.telegramId!,
       `Zepto isn't configured on the server yet. Sorry! 😬`,
     );
     return true;
@@ -275,7 +275,7 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
 
   if (!pending) {
     await sendHtml(
-      user.telegramId,
+      user.telegramId!,
       `I don't see an active Zepto connection in progress. Start one with <b>/connect_zepto</b> 🛒`,
     );
     return true;
@@ -287,7 +287,7 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
       .delete(oauthPendingStates)
       .where(eq(oauthPendingStates.state, pending.state));
     await sendHtml(
-      user.telegramId,
+      user.telegramId!,
       `That code's link has expired. Kick it off again with <b>/connect_zepto</b> 🕙`,
     );
     return true;
@@ -305,7 +305,7 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
   } catch (err) {
     log.error(`Token exchange failed for user ${user.id}`, err);
     await sendHtml(
-      user.telegramId,
+      user.telegramId!,
       `Couldn't verify that code with Zepto. Either it's already been used or it's mistyped — try /connect_zepto again.`,
     );
     return true;
@@ -346,7 +346,7 @@ async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<bo
     .where(eq(oauthPendingStates.state, pending.state));
 
   await sendHtml(
-    user.telegramId,
+    user.telegramId!,
     `✅ <b>Zepto connected!</b>
 
 Now you can say things like:
@@ -364,7 +364,7 @@ I'll check your pantry first, then guide the Zepto order with buttons when somet
 
 async function handleFeedback(ctx: CommandContext): Promise<boolean> {
   await sendHtml(
-    ctx.user.telegramId,
+    ctx.user.telegramId!,
     `<b>Tell me what's on your mind</b> 💭
 
 Anything — features you want, things that broke, random thoughts. I'm listening.`,

@@ -79,7 +79,7 @@ function keyboardForStep(step: OnboardingStep): TelegramInlineKeyboard | undefin
 
 /** Sends a message and persists it as the assistant message. */
 async function sendAndPersist(user: User, text: string, step: OnboardingStep = user.onboardingStep) {
-  await sendHtml(user.telegramId, text, { inlineKeyboard: keyboardForStep(step) });
+  await sendHtml(user.telegramId!, text, { inlineKeyboard: keyboardForStep(step) });
   await persistMessage(user.id, 'assistant', text);
 }
 

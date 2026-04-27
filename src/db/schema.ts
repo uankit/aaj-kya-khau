@@ -12,7 +12,7 @@ import {
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 /* ------------------------------------------------------------------ */
 /* Enums                                                              */
@@ -51,6 +51,8 @@ export const activityLevelEnum = pgEnum('activity_level', [
 
 export const healthGoalEnum = pgEnum('health_goal', ['lose', 'maintain', 'gain']);
 
+export const surfaceEnum = pgEnum('surface', ['telegram', 'whatsapp']);
+
 /* ------------------------------------------------------------------ */
 /* users                                                              */
 /* ------------------------------------------------------------------ */
@@ -59,7 +61,27 @@ export const users = pgTable(
   'users',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    telegramId: varchar('telegram_id', { length: 30 }).notNull(),
+    /**
+     * Email is the primary identity for web-onboarded users. Nullable to
+     * preserve compatibility with users created before web onboarding shipped
+     * (Telegram-only flow). Once the legacy chat-onboarding path is deleted,
+     * make this NOT NULL.
+     */
+    email: varchar('email', { length: 200 }),
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+    /**
+     * Legacy: now nullable. New users sign up by email; telegram_id is
+     * populated when they bind a Telegram surface. surface_bindings is the
+     * new source of truth; we keep this column for the duration of the
+     * migration to avoid breaking old code paths.
+     */
+    telegramId: varchar('telegram_id', { length: 30 }),
+    /**
+     * Where proactive sends (nudges, summaries) should land. Nullable until
+     * the user binds at least one surface. Set on first bind, can be changed
+     * later in settings.
+     */
+    primarySurface: surfaceEnum('primary_surface'),
     name: varchar('name', { length: 100 }),
     dietType: dietTypeEnum('diet_type'),
     timezone: varchar('timezone', { length: 40 }).notNull().default('Asia/Kolkata'),
@@ -85,7 +107,13 @@ export const users = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
+    // Telegram ID is unique only when set. Postgres treats NULLs as distinct,
+    // so this works as a "unique-when-not-null" index naturally.
     telegramIdUnique: uniqueIndex('users_telegram_id_unique').on(table.telegramId),
+    // Same for email: unique partial index, NULLs ignored.
+    emailUnique: uniqueIndex('users_email_unique')
+      .on(table.email)
+      .where(sql`${table.email} IS NOT NULL`),
   }),
 );
 
@@ -95,7 +123,121 @@ export const usersRelations = relations(users, ({ many }) => ({
   invoices: many(invoices),
   mealLogs: many(mealLogs),
   messages: many(messages),
+  surfaceBindings: many(surfaceBindings),
 }));
+
+/* ------------------------------------------------------------------ */
+/* surface_bindings — which chat surfaces are linked to a user.       */
+/*                                                                    */
+/* Replaces the single users.telegram_id column with an n-to-one      */
+/* model: a user can have a Telegram binding AND a WhatsApp binding   */
+/* simultaneously. Inbound messages on either surface look up the     */
+/* user via (surface, external_id).                                   */
+/* ------------------------------------------------------------------ */
+
+export const surfaceBindings = pgTable(
+  'surface_bindings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    surface: surfaceEnum('surface').notNull(),
+    /** Telegram chat_id, WhatsApp E.164 number (no "whatsapp:" prefix). */
+    externalId: varchar('external_id', { length: 80 }).notNull(),
+    boundAt: timestamp('bound_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // One binding per (user, surface). Adding a second Telegram binding for
+    // the same user replaces the existing one (handle in code).
+    userSurfaceUnique: uniqueIndex('surface_bindings_user_surface_unique').on(
+      table.userId,
+      table.surface,
+    ),
+    // External IDs are globally unique within a surface — one Telegram chat
+    // can't be bound to two users.
+    surfaceExternalUnique: uniqueIndex('surface_bindings_surface_external_unique').on(
+      table.surface,
+      table.externalId,
+    ),
+  }),
+);
+
+export const surfaceBindingsRelations = relations(surfaceBindings, ({ one }) => ({
+  user: one(users, { fields: [surfaceBindings.userId], references: [users.id] }),
+}));
+
+/* ------------------------------------------------------------------ */
+/* bind_tokens — one-time tokens minted on the web during onboarding, */
+/* consumed when the user first messages the chosen surface.          */
+/* ------------------------------------------------------------------ */
+
+export const bindTokens = pgTable(
+  'bind_tokens',
+  {
+    token: varchar('token', { length: 32 }).primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    surface: surfaceEnum('surface').notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdx: index('bind_tokens_user_idx').on(table.userId),
+    expiresIdx: index('bind_tokens_expires_idx').on(table.expiresAt),
+  }),
+);
+
+/* ------------------------------------------------------------------ */
+/* magic_link_tokens — email-based passwordless sign-in.              */
+/*                                                                    */
+/* Issued when a user submits their email; consumed when they click   */
+/* the link. On consumption: find-or-create users row, set            */
+/* email_verified_at, mint a session cookie.                          */
+/* ------------------------------------------------------------------ */
+
+export const magicLinkTokens = pgTable(
+  'magic_link_tokens',
+  {
+    token: varchar('token', { length: 64 }).primaryKey(),
+    email: varchar('email', { length: 200 }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    emailIdx: index('magic_link_tokens_email_idx').on(table.email),
+    expiresIdx: index('magic_link_tokens_expires_idx').on(table.expiresAt),
+  }),
+);
+
+/* ------------------------------------------------------------------ */
+/* web_sessions — server-side session cookies for the web UI.         */
+/*                                                                    */
+/* Stored hashed: the cookie value the browser holds is the raw       */
+/* token; we hash it before lookup. Compromise of the DB doesn't      */
+/* leak active session tokens.                                        */
+/* ------------------------------------------------------------------ */
+
+export const webSessions = pgTable(
+  'web_sessions',
+  {
+    /** SHA-256 hex of the raw session token. */
+    tokenHash: varchar('token_hash', { length: 64 }).primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdx: index('web_sessions_user_idx').on(table.userId),
+    expiresIdx: index('web_sessions_expires_idx').on(table.expiresAt),
+  }),
+);
 
 /* ------------------------------------------------------------------ */
 /* user_schedules                                                     */

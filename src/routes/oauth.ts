@@ -228,7 +228,7 @@ export async function oauthRoutes(app: FastifyInstance) {
       const [user] = await db.select().from(users).where(eq(users.id, pending.userId)).limit(1);
       if (user) {
         sendHtml(
-          user.telegramId,
+          user.telegramId!,
           `✅ <b>Zepto connected!</b>\n\nNow I can help with cravings and missing ingredients straight from chat.\n\nTry: <code>I'm craving Bournville</code>`,
         ).catch((err) => log.warn(`Post-connect DM failed for ${user.telegramId}`, err));
       }
