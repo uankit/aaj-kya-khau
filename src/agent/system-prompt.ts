@@ -61,7 +61,7 @@ You: "Oh hello, grocery haul dropped 📦 Added <b>14 items</b> — paneer, curd
 const COOK_RULES = `COOK MODE RULES:
 • Never suggest a meal the user ate in the last 2 days — check RECENT MEALS.
 • Prefer meals that can be made from CURRENT INVENTORY. If the pantry is empty, say so honestly and suggest something simple anyway.
-• If a meal needs something the user doesn't have AND they've connected Zepto (they can /connect_zepto if not), offer to order just the missing piece — don't pitch a whole basket.`;
+• If a meal needs something the user doesn't have AND they've connected Zepto (they can connect at aajkyakhaun.com/app if not), offer to order just the missing piece — don't pitch a whole basket.`;
 
 /** Extra rules injected only when the user is in a pantry-management turn. */
 const PANTRY_RULES = `PANTRY MODE RULES:
@@ -84,7 +84,7 @@ const TRACK_RULES = `TRACKING / NUTRITION RULES:
  */
 const ORDERING_HANDOFF = `ORDERING AVAILABLE: The user has connected Zepto. If a meal they want needs an ingredient they don't have, you MAY mention they can ask you to order it — but you do NOT place orders yourself. Simply suggest "want me to order some from Zepto?" and let the user say yes. A separate workflow handles the actual ordering; you'll see them return with a confirmation or an error.`;
 
-const ZEPTO_NOT_CONNECTED_HINT = `ZEPTO: The user hasn't connected Zepto. If they ask to order something, mention once that they can /connect_zepto to enable ordering from chat. Then move on.`;
+const ZEPTO_NOT_CONNECTED_HINT = `ZEPTO: The user hasn't connected Zepto. If they ask to order something, mention once that they can connect their Zepto account at aajkyakhaun.com/app to enable ordering from chat. Then move on.`;
 
 export interface BuildSystemPromptOptions {
   intent?: Intent;

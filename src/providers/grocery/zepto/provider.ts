@@ -141,19 +141,28 @@ export const zeptoProvider: GroceryProvider = {
   async searchMany(userId, queries) {
     if (queries.length === 0) return [];
     const result = await call(userId, 'search_multiple_products', { queries });
-    type Resp = { groups?: Array<{ query: string; products?: RawProduct[] }> };
+    // Zepto's actual shape: structuredContent.sections[].{ query, products }
+    type Resp = {
+      sections?: Array<{ query: string; products?: RawProduct[] }>;
+      groups?: Array<{ query: string; products?: RawProduct[] }>;
+    };
     const s = structured<Resp>(result);
-    if (s?.groups) {
-      return s.groups.map((g) => ({
+    const list = s?.sections ?? s?.groups;
+    if (list) {
+      return list.map((g) => ({
         query: g.query,
-        products: (g.products ?? []).map(toProductOption).filter((x): x is ProductOption => x !== null),
+        products: (g.products ?? [])
+          .map(toProductOption)
+          .filter((x): x is ProductOption => x !== null),
       }));
     }
     // Fallback — single combined products array; collapse into one group per query.
     type Flat = { products?: RawProduct[] };
     const flat = structured<Flat>(result);
     if (flat?.products) {
-      const products = flat.products.map(toProductOption).filter((x): x is ProductOption => x !== null);
+      const products = flat.products
+        .map(toProductOption)
+        .filter((x): x is ProductOption => x !== null);
       return queries.map((q) => ({ query: q, products }));
     }
     parseFailure('search_multiple_products', result);
@@ -208,12 +217,22 @@ export const zeptoProvider: GroceryProvider = {
     };
     const s = structured<Resp>(result);
     const list = s?.items ?? s?.products;
-    if (!list) parseFailure('get_past_order_items', result);
-    return list.map<PastOrderItem>((it) => ({
-      name: it.name,
-      productVariantId: it.productVariantId,
-      frequency: it.frequency,
-    }));
+    if (list) {
+      return list.map<PastOrderItem>((it) => ({
+        name: it.name,
+        productVariantId: it.productVariantId,
+        frequency: it.frequency,
+      }));
+    }
+    // Fallback: Zepto returns this tool as plain text on text/event-stream.
+    // Format:
+    //   Found N unique products from past orders:
+    //   1. <name> (ordered in <K> orders)
+    //   2. ...
+    //   Product Variant IDs:
+    //   [1] pvid: <uuid>
+    //   [2] pvid: <uuid>
+    return parsePastOrderItemsText(flattenText(result));
   },
 
   async upsertCart(userId, lines, opts) {
@@ -268,13 +287,19 @@ export const zeptoProvider: GroceryProvider = {
     const args: Record<string, unknown> = { confirmOrder: false, userAddressId: opts.addressId };
     const tool = orderToolForMethod(opts.paymentMethod);
     const result = await call(userId, tool, args);
+    // Zepto's preview shape (observed):
+    //   { isPreview, items[], toPayAmount, deliveryFee, packagingFee?,
+    //     subTotal?, taxes?, discount?, etaInMinutes?, ... }
+    // subTotal often arrives null; we derive it from the line items.
     type Resp = {
       cartKey?: string;
-      subtotal?: number;
-      deliveryFee?: number;
-      handlingFee?: number;
-      total?: number;
-      etaMinutes?: number;
+      subTotal?: number | null;
+      deliveryFee?: number | null;
+      packagingFee?: number | null;
+      taxes?: number | null;
+      toPayAmount?: number | null;
+      etaInMinutes?: number | null;
+      items?: Array<{ price?: number | null; quantity?: number | null }>;
       dropZoneRequired?: boolean;
       dropZoneConfig?: { slots?: Array<{ value: string }> };
     };
@@ -283,13 +308,25 @@ export const zeptoProvider: GroceryProvider = {
     const requiresDropZone = s.dropZoneRequired
       ? { availableSlots: (s.dropZoneConfig?.slots ?? []).map((x) => x.value) }
       : undefined;
+    const deliveryFee = s.deliveryFee ?? 0;
+    const handlingFee = s.packagingFee ?? 0;
+    const taxes = s.taxes ?? 0;
+    const total = s.toPayAmount ?? 0;
+    const subtotal =
+      s.subTotal ??
+      (s.items
+        ? s.items.reduce(
+            (acc, it) => acc + (it.price ?? 0) * (it.quantity ?? 1),
+            0,
+          )
+        : Math.max(0, total - deliveryFee - handlingFee - taxes));
     return {
       cartKey: s.cartKey,
-      subtotalPaise: s.subtotal ?? 0,
-      deliveryFeePaise: s.deliveryFee ?? 0,
-      handlingFeePaise: s.handlingFee ?? 0,
-      totalPaise: s.total ?? 0,
-      etaMinutes: s.etaMinutes,
+      subtotalPaise: subtotal,
+      deliveryFeePaise: deliveryFee,
+      handlingFeePaise: handlingFee,
+      totalPaise: total,
+      etaMinutes: s.etaInMinutes ?? undefined,
       requiresDropZone,
     };
   },
@@ -394,3 +431,37 @@ function orderToolForMethod(method: PaymentMethod): string {
 
 // Re-export status type so callers don't need a second import.
 export type { PaymentStatus };
+
+/**
+ * Parse the plain-text get_past_order_items payload Zepto returns.
+ * Zips the numbered product list with the [N] pvid: <uuid> section.
+ * Items missing a pvid match are skipped silently.
+ */
+export function parsePastOrderItemsText(text: string): PastOrderItem[] {
+  // 1. Capture name + frequency: "1. <name> (ordered in 3 orders)"
+  const nameRe = /^\s*(\d+)\.\s+(.+?)\s+\(ordered in (\d+)\s+orders?\)\s*$/gm;
+  const nameByIdx: Record<number, { name: string; frequency: number }> = {};
+  for (const m of text.matchAll(nameRe)) {
+    const idx = Number(m[1]);
+    nameByIdx[idx] = { name: m[2]!.trim(), frequency: Number(m[3]) };
+  }
+
+  // 2. Capture pvid by index: "[1] pvid: 4b3f8659-..."
+  const pvidRe = /\[(\d+)\]\s+pvid:\s+([a-f0-9-]+)/gi;
+  const pvidByIdx: Record<number, string> = {};
+  for (const m of text.matchAll(pvidRe)) {
+    pvidByIdx[Number(m[1])] = m[2]!;
+  }
+
+  // 3. Zip; sort by frequency desc to match the structured contract.
+  const out: PastOrderItem[] = [];
+  for (const idxStr of Object.keys(nameByIdx)) {
+    const idx = Number(idxStr);
+    const meta = nameByIdx[idx]!;
+    const pvid = pvidByIdx[idx];
+    if (!pvid) continue;
+    out.push({ name: meta.name, productVariantId: pvid, frequency: meta.frequency });
+  }
+  out.sort((a, b) => b.frequency - a.frequency);
+  return out;
+}

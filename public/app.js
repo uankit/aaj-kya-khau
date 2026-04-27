@@ -14,13 +14,12 @@
   const dotsEl = document.getElementById('step-dots');
 
   let me = null;
-  let chosenSurface = null;
-  let bindLink = null;
 
   function show(step) {
     loadingEl.hidden = true;
     STEPS.forEach((s) => (stepEls[s].hidden = s !== step));
     renderDots(step);
+    if (step === 'surface') void loadSurfaceStep();
   }
 
   function renderDots(active) {
@@ -36,11 +35,9 @@
   }
 
   async function api(path, opts = {}) {
-    const res = await fetch(path, {
-      ...opts,
-      headers: { 'Content-Type': 'application/json', ...(opts.headers ?? {}) },
-    });
-    return res;
+    const headers = { ...(opts.headers ?? {}) };
+    if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
+    return fetch(path, { ...opts, headers });
   }
 
   async function loadMe() {
@@ -135,9 +132,13 @@
 
   zeptoConnectBtn.addEventListener('click', async () => {
     zeptoErr.hidden = true;
-    const code = zeptoCodeInput.value.trim();
+    const raw = zeptoCodeInput.value.trim();
+    // Accept either a bare code or the full Postman callback URL —
+    // pluck the code= param if a URL was pasted.
+    const m = raw.match(/[?&]code=([^&\s]+)/);
+    const code = m ? decodeURIComponent(m[1]) : raw;
     if (!code) {
-      zeptoErr.textContent = 'Paste the code from the Postman page first.';
+      zeptoErr.textContent = 'Paste the code or the whole callback URL.';
       zeptoErr.hidden = false;
       return;
     }
@@ -164,42 +165,30 @@
 
   document.getElementById('zepto-continue').addEventListener('click', () => show('surface'));
 
-  // ── Surface ────────────────────────────────────────────
-  const bindPrompt = document.getElementById('bind-prompt');
-  const bindPromptText = document.getElementById('bind-prompt-text');
+  // ── Surface (Telegram only) ────────────────────────────
   const bindLinkEl = document.getElementById('bind-link');
-  document.querySelectorAll('.surface-card').forEach((card) => {
-    card.addEventListener('click', async () => {
-      document.querySelectorAll('.surface-card').forEach((c) => c.classList.remove('is-selected'));
-      card.classList.add('is-selected');
-      const surface = card.dataset.surface;
-      chosenSurface = surface;
-      const res = await api('/api/me/bind/start', {
-        method: 'POST',
-        body: JSON.stringify({ surface }),
-      });
-      if (!res.ok) {
-        alert('Could not start bind. Try again.');
-        return;
-      }
-      const { deepLink } = await res.json();
-      bindLink = deepLink;
-      bindLinkEl.href = deepLink;
-      bindPromptText.textContent =
-        surface === 'whatsapp'
-          ? 'Tap below to open WhatsApp. The verification message is pre-filled — just hit send.'
-          : 'Tap below to open Telegram. Hit start and you’re in.';
-      bindPrompt.hidden = false;
-      // Mark complete optimistically — verification will happen when user
-      // sends the first message. We move them to "done" after they tap the link.
-      await api('/api/me/onboarding/complete', { method: 'POST' });
-      setTimeout(() => {
-        document.getElementById('done-link').href = deepLink;
-        document.getElementById('done-surface').textContent =
-          surface === 'whatsapp' ? 'WhatsApp' : 'Telegram';
-        show('done');
-      }, 1200);
+  let surfaceLoaded = false;
+  async function loadSurfaceStep() {
+    if (surfaceLoaded) return;
+    surfaceLoaded = true;
+    const res = await api('/api/me/bind/start', {
+      method: 'POST',
+      body: JSON.stringify({ surface: 'telegram' }),
     });
+    if (!res.ok) {
+      alert('Could not generate the Telegram link. Refresh and try again.');
+      return;
+    }
+    const { deepLink } = await res.json();
+    bindLinkEl.href = deepLink;
+    document.getElementById('done-link').href = deepLink;
+    document.getElementById('done-surface').textContent = 'Telegram';
+  }
+  bindLinkEl.addEventListener('click', async () => {
+    // The user is leaving for Telegram. Mark onboarding complete optimistically;
+    // the actual verify happens when they send /start <token>.
+    await api('/api/me/onboarding/complete', { method: 'POST' });
+    setTimeout(() => show('done'), 1200);
   });
 
   // ── Boot ───────────────────────────────────────────────

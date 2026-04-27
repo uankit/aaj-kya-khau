@@ -261,44 +261,6 @@
 .connector-state { display: flex; flex-direction: column; gap: 14px; }
 .success-state { align-items: flex-start; }
 
-/* ── Surface picker ───────────────────────────────────────── */
-.surface-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 8px;
-}
-.surface-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 22px 20px;
-  border-radius: var(--radius);
-  border: 1.5px solid rgba(23, 44, 102, 0.1);
-  background: var(--cream-2);
-  cursor: pointer;
-  font-family: var(--font-body);
-  transition: all 0.15s;
-  text-align: left;
-}
-.surface-card:hover {
-  border-color: var(--coral);
-  transform: translateY(-2px);
-}
-.surface-card.is-selected {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: var(--white);
-}
-.surface-icon { font-size: 26px; }
-.surface-name {
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 18px;
-}
-.surface-hint { font-size: 13px; opacity: 0.75; }
-
 .bind-prompt {
   margin-top: 24px;
   padding: 20px;
@@ -313,6 +275,5 @@
 /* ── Mobile ───────────────────────────────────────────────── */
 @media (max-width: 480px) {
   .card { padding: 28px 22px; border-radius: var(--radius); }
-  .surface-grid { grid-template-columns: 1fr; }
   .time-row { grid-template-columns: 28px 1fr 100px; gap: 8px; }
 }

@@ -16,8 +16,9 @@
  */
 
 import { generateText, type CoreMessage } from 'ai';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import { messages } from '../db/schema.js';
+import { messages, surfaceBindings, users } from '../db/schema.js';
 import { model } from '../llm/client.js';
 import { sendHtml } from '../surfaces/telegram/index.js';
 import { parseAndSaveInvoice } from '../domain/orders/invoice.js';
@@ -118,12 +119,15 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
     // Drives which tools / prompt sections fire, and whether we dispatch
     // to the Zepto workflow instead of the LLM.
     let intent: Intent | undefined;
-    let orderQuery: string | undefined;
+    let orderItems: import('./intent.js').OrderItem[] | undefined;
     if (trigger.type === 'message') {
       const classified = await classifyIntent(trigger.text, ctx.history);
       intent = classified.intent;
-      orderQuery = classified.orderQuery;
-      log.info(`turn intent=${intent} user=${userId}`, orderQuery ? { orderQuery } : undefined);
+      orderItems = classified.orderItems;
+      log.info(
+        `turn intent=${intent} user=${userId}`,
+        orderItems ? { orderItems } : undefined,
+      );
     }
 
     // ── 3b. Order intent → deterministic workflow ────────────────────────
@@ -134,14 +138,14 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
       if (!(await hasZeptoConnected(userId))) {
         await sendAndPersist(
           userId,
-          "Zepto isn't connected yet. Run <b>/connect_zepto</b> first so I can place orders for you 🛒",
+          'Zepto isn\'t connected yet. Connect your account at <a href="https://aajkyakhaun.com/app">aajkyakhaun.com/app</a> so I can place orders for you 🛒',
         );
         return;
       }
       const reply = await runOrderTurn({
         userId,
         message: trigger.text,
-        orderQuery,
+        orderItems,
       });
       await sendAndPersist(userId, reply.text);
       return;
@@ -331,28 +335,56 @@ function sleep(ms: number): Promise<void> {
  * history will have a one-turn gap which is much better than a double text.
  */
 async function sendAndPersist(userId: string, text: string): Promise<void> {
-  const telegramId = await telegramIdForUserId(userId);
-  if (!telegramId) {
-    log.warn(`Cannot send — user ${userId} has no telegram_id`);
+  const target = await resolveOutboundTarget(userId);
+  if (!target) {
+    log.warn(`Cannot send — user ${userId} has no bound surface`);
     return;
   }
-  await sendHtml(telegramId, text);
+
+  try {
+    await sendHtml(target.externalId, text);
+  } catch (err) {
+    log.error(`outbound send failed for user=${userId}`, err);
+    return; // don't persist if the user never got the message
+  }
+
   try {
     await db.insert(messages).values({ userId, role: 'assistant', content: text });
   } catch (persistErr) {
     log.error(
-      `Message sent to ${telegramId} but DB persist failed — history will have a gap`,
+      `Message sent to user=${userId} but DB persist failed — history will have a gap`,
       persistErr,
     );
-    // Deliberately do NOT rethrow: user already got their reply, and
-    // rethrowing would trigger the fallback path which would double-send.
+    // Deliberately do NOT rethrow: user already got their reply.
   }
 }
 
-async function telegramIdForUserId(userId: string): Promise<string | null> {
+/**
+ * Resolve where to send a user's reply. Prefers the user's primary_surface
+ * (set on first bind), falls back to whatever binding exists. For legacy
+ * users with telegram_id but no surface_bindings row yet, falls back to the
+ * column directly.
+ */
+async function resolveOutboundTarget(
+  userId: string,
+): Promise<{ surface: 'telegram'; externalId: string } | null> {
   const user = await db.query.users.findFirst({
-    where: (u, { eq }) => eq(u.id, userId),
+    where: eq(users.id, userId),
     columns: { telegramId: true },
   });
-  return user?.telegramId ?? null;
+  if (!user) return null;
+
+  // Prefer the active telegram binding; fall back to the legacy
+  // users.telegram_id column for pre-migration users.
+  const [binding] = await db
+    .select({ externalId: surfaceBindings.externalId })
+    .from(surfaceBindings)
+    .where(
+      and(eq(surfaceBindings.userId, userId), eq(surfaceBindings.surface, 'telegram')),
+    )
+    .limit(1);
+  if (binding) return { surface: 'telegram', externalId: binding.externalId };
+  if (user.telegramId) return { surface: 'telegram', externalId: user.telegramId };
+  return null;
 }
+

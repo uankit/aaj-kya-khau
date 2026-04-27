@@ -8,7 +8,12 @@
  * too much to be worth abstracting before WhatsApp is wired.
  */
 
-export type SurfaceName = 'telegram' | 'whatsapp';
+/**
+ * Live chat surfaces. The DB enum (db/schema.ts: surfaceEnum) carries
+ * 'telegram' and 'whatsapp' for migration safety, but only telegram is
+ * runtime-supported. Add new surfaces here once their adapter ships.
+ */
+export type SurfaceName = 'telegram';
 
 /** Surface-agnostic outbound message. Adapters lower into native form. */
 export type OutboundContent =
@@ -28,23 +33,9 @@ export interface SurfaceAdapter {
 
   /**
    * Send freeform content to a user identified by their external surface ID
-   * (Telegram chat_id, WhatsApp E.164 number).
-   *
-   * For WhatsApp outside the 24-hour session window, this throws — the
-   * caller must use sendTemplate. The deliver() router handles that policy.
+   * (Telegram chat_id today; future surfaces will define their own).
    */
   send(externalId: string, content: OutboundContent): Promise<SendResult>;
-
-  /**
-   * Send a pre-approved template (WhatsApp Cloud API requirement for sends
-   * outside the 24-hour session window). Telegram impl is a no-op shim
-   * that falls back to send() since Telegram has no template system.
-   */
-  sendTemplate(
-    externalId: string,
-    templateName: string,
-    params: string[],
-  ): Promise<SendResult>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────

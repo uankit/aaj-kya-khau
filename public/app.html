@@ -100,8 +100,8 @@
           <button type="button" class="btn btn-ghost" id="zepto-open">Open Zepto auth ↗</button>
         </div>
         <label class="field">
-          <span class="field-label">Auth code</span>
-          <input type="text" id="zepto-code" placeholder="paste the code here" autocomplete="off" />
+          <span class="field-label">Auth code or callback URL</span>
+          <input type="text" id="zepto-code" placeholder="paste the code OR the whole postman://… URL" autocomplete="off" />
         </label>
         <p class="form-error" id="zepto-error" hidden></p>
         <button type="button" class="btn btn-primary" id="zepto-connect">Connect Zepto</button>
@@ -116,28 +116,14 @@
       </div>
     </section>
 
-    <!-- Step 4: Pick chat surface -->
+    <!-- Step 4: Connect Telegram -->
     <section class="card" id="step-surface" hidden>
-      <h1>Where should I message you?</h1>
-      <p class="lede">Pick where you want me to live. You can add the other later from Settings.</p>
+      <h1>Last step — connect Telegram.</h1>
+      <p class="lede">Tap below. Telegram opens with a one-tap verify message — hit send and you’re in.</p>
 
-      <div class="surface-grid">
-        <button type="button" class="surface-card" data-surface="whatsapp">
-          <span class="surface-icon">💬</span>
-          <span class="surface-name">WhatsApp</span>
-          <span class="surface-hint">For most people</span>
-        </button>
-        <button type="button" class="surface-card" data-surface="telegram">
-          <span class="surface-icon">✈️</span>
-          <span class="surface-name">Telegram</span>
-          <span class="surface-hint">If that’s your thing</span>
-        </button>
-      </div>
-
-      <div class="bind-prompt" id="bind-prompt" hidden>
-        <p class="lede" id="bind-prompt-text"></p>
-        <a class="btn btn-primary" id="bind-link" target="_blank" rel="noreferrer">Open chat ↗</a>
-        <p class="hint">Once you send the first message, you’re in. This page will close itself.</p>
+      <div class="bind-prompt" id="bind-prompt">
+        <a class="btn btn-primary" id="bind-link" target="_blank" rel="noreferrer">Open Telegram ↗</a>
+        <p class="hint">Don’t have Telegram? Grab it from the App Store / Play Store, sign in, then come back and tap above.</p>
       </div>
     </section>
 

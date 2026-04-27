@@ -153,8 +153,6 @@ function callbackDataToMessage(data: string): string | null {
       return '/today';
     case 'cmd:schedule':
       return '/schedule';
-    case 'cmd:connect_zepto':
-      return '/connect_zepto';
     case 'onboard:diet:1':
       return '1';
     case 'onboard:diet:2':

@@ -11,26 +11,12 @@
  * Keep the agent in charge of anything that benefits from LLM intelligence.
  */
 
-import { and, desc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../config/database.js';
-import {
-  connectedAccounts,
-  oauthPendingStates,
-  userSchedules,
-  type User,
-} from '../db/schema.js';
+import { userSchedules, type User } from '../db/schema.js';
 import { sendHtml, type TelegramInlineKeyboard } from '../surfaces/telegram/index.js';
 import { unregisterMealCron } from '../services/scheduler.js';
 import { unregisterNightlyCron } from '../services/nightly.js';
-import {
-  buildAuthorizationUrl,
-  exchangeCodeForTokens,
-  generatePkce,
-  generateState,
-  ZEPTO_POSTMAN_REDIRECT,
-} from '../providers/grocery/zepto/oauth.js';
-import { encrypt } from '../utils/crypto.js';
-import { env } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/html.js';
 
@@ -47,7 +33,7 @@ const HELP_TEXT = `<b>Here's what I can do</b> 🤌
 📈 <b>/today</b> — nutrition summary
 ⏰ <b>/schedule</b> — reminder times
 👤 <b>/profile</b> — nutrition setup
-🛒 <b>/connect_zepto</b> — order cravings or missing items
+🛒 Order cravings/missing items — connect Zepto at <a href="https://aajkyakhaun.com/app">aajkyakhaun.com/app</a>
 🔇 <b>/mute</b> — pause reminders
 💬 <b>/feedback</b> — tell me what's broken
 
@@ -62,7 +48,6 @@ const MAIN_MENU_KEYBOARD: TelegramInlineKeyboard = [
     { text: 'Today summary', callbackData: 'cmd:today' },
     { text: 'Schedule', callbackData: 'cmd:schedule' },
   ],
-  [{ text: 'Connect Zepto', callbackData: 'cmd:connect_zepto' }],
 ];
 
 /** Menu shown to returning onboarded users who send /start */
@@ -76,7 +61,7 @@ function welcomeBackText(name: string | null): string {
 📊 Pantry check
 📈 Nutrition summary
 ⏰ Reminder settings
-🛒 Zepto for cravings or missing items`;
+🛒 Order cravings or missing items`;
 }
 
 export interface CommandContext {
@@ -109,9 +94,8 @@ export async function tryHandleCommand(text: string, ctx: CommandContext): Promi
     case '/feedback':
       return handleFeedback(ctx);
     case '/connect_zepto':
-      return handleConnectZepto(ctx);
     case '/zepto_code':
-      return handleZeptoCode(ctx, trimmed);
+      return handleZeptoMoved(ctx);
     default:
       // Let the agent handle everything else (/hungry, /kitchen, /ate, etc.)
       return false;
@@ -176,189 +160,14 @@ Just say something like <code>remind me for breakfast at 9</code> or use <b>/sch
   return true;
 }
 
-async function handleConnectZepto(ctx: CommandContext): Promise<boolean> {
-  const { user } = ctx;
-
-  if (!env.ZEPTO_CLIENT_ID || !env.ENCRYPTION_KEY) {
-    await sendHtml(
-      user.telegramId!,
-      `Zepto connection isn't configured on the server yet. Hang tight 🛒`,
-    );
-    log.warn(`/connect_zepto requested by ${user.telegramId} but env not fully configured`);
-    return true;
-  }
-
-  // Clear any stale in-flight state for this user — we only allow one active
-  // Zepto OAuth attempt at a time. Simplifies the /zepto_code lookup.
-  await db
-    .delete(oauthPendingStates)
-    .where(
-      and(
-        eq(oauthPendingStates.userId, user.id),
-        eq(oauthPendingStates.provider, 'zepto'),
-      ),
-    );
-
-  const { codeVerifier, codeChallenge } = generatePkce();
-  const state = generateState();
-
-  await db.insert(oauthPendingStates).values({
-    state,
-    userId: user.id,
-    provider: 'zepto',
-    codeVerifier,
-  });
-
-  // Note: redirect_uri here must exactly match what's registered on Zepto
-  // AND what we send in the token exchange later. Using Postman's OOB page.
-  const authUrl = buildAuthorizationUrl({
-    clientId: env.ZEPTO_CLIENT_ID,
-    redirectUri: ZEPTO_POSTMAN_REDIRECT,
-    state,
-    codeChallenge,
-  });
-
+async function handleZeptoMoved(ctx: CommandContext): Promise<boolean> {
   await sendHtml(
-    user.telegramId!,
-    `<b>Let's link your Zepto account</b> 🛒
-
-1. Tap this link to approve:
-${escapeHtml(authUrl)}
-
-2. You'll land on a page that shows an <b>authorization code</b> — copy it.
-
-3. Come back here and send:
-<code>/zepto_code PASTE_THE_CODE_HERE</code>
-
-(The link stays valid for 10 minutes.)
-
-<b>One heads-up:</b> Zepto is hyperlocal — make sure you have a <b>delivery address set on your Zepto account</b> before ordering through me, otherwise search & checkout will fail. If you've used Zepto before, you're good.`,
+    ctx.user.telegramId!,
+    `Connecting Zepto now happens on the web — head to ` +
+      `<a href="https://aajkyakhaun.com/app">aajkyakhaun.com/app</a>, ` +
+      `link your account, and you're set 🛒`,
   );
-  log.info(`/connect_zepto link (Postman OOB) issued to ${user.telegramId}`);
-  return true;
-}
-
-async function handleZeptoCode(ctx: CommandContext, rawText: string): Promise<boolean> {
-  const { user } = ctx;
-
-  // Extract the code — everything after the command, first token only
-  const parts = rawText.trim().split(/\s+/);
-  const code = parts[1];
-  if (!code) {
-    await sendHtml(
-      user.telegramId!,
-      `Send the code like this:\n\n<code>/zepto_code YOUR_CODE_HERE</code>`,
-    );
-    return true;
-  }
-
-  if (!env.ZEPTO_CLIENT_ID || !env.ENCRYPTION_KEY) {
-    await sendHtml(
-      user.telegramId!,
-      `Zepto isn't configured on the server yet. Sorry! 😬`,
-    );
-    return true;
-  }
-
-  // Look up the most recent pending state for this user + provider
-  const [pending] = await db
-    .select()
-    .from(oauthPendingStates)
-    .where(
-      and(
-        eq(oauthPendingStates.userId, user.id),
-        eq(oauthPendingStates.provider, 'zepto'),
-      ),
-    )
-    .orderBy(desc(oauthPendingStates.createdAt))
-    .limit(1);
-
-  if (!pending) {
-    await sendHtml(
-      user.telegramId!,
-      `I don't see an active Zepto connection in progress. Start one with <b>/connect_zepto</b> 🛒`,
-    );
-    return true;
-  }
-
-  const ageMs = Date.now() - pending.createdAt.getTime();
-  if (ageMs > 10 * 60 * 1000) {
-    await db
-      .delete(oauthPendingStates)
-      .where(eq(oauthPendingStates.state, pending.state));
-    await sendHtml(
-      user.telegramId!,
-      `That code's link has expired. Kick it off again with <b>/connect_zepto</b> 🕙`,
-    );
-    return true;
-  }
-
-  // Exchange code for tokens
-  let tokens;
-  try {
-    tokens = await exchangeCodeForTokens({
-      clientId: env.ZEPTO_CLIENT_ID,
-      code,
-      redirectUri: ZEPTO_POSTMAN_REDIRECT,
-      codeVerifier: pending.codeVerifier,
-    });
-  } catch (err) {
-    log.error(`Token exchange failed for user ${user.id}`, err);
-    await sendHtml(
-      user.telegramId!,
-      `Couldn't verify that code with Zepto. Either it's already been used or it's mistyped — try /connect_zepto again.`,
-    );
-    return true;
-  }
-
-  // Encrypt + upsert + cleanup
-  const accessCt = encrypt(tokens.access_token);
-  const refreshCt = tokens.refresh_token ? encrypt(tokens.refresh_token) : null;
-  const expiresAt = tokens.expires_in
-    ? new Date(Date.now() + tokens.expires_in * 1000)
-    : null;
-
-  await db
-    .insert(connectedAccounts)
-    .values({
-      userId: user.id,
-      provider: 'zepto',
-      accessTokenCiphertext: accessCt,
-      refreshTokenCiphertext: refreshCt,
-      tokenExpiresAt: expiresAt,
-      scopes: tokens.scope ?? null,
-      status: 'active',
-    })
-    .onConflictDoUpdate({
-      target: [connectedAccounts.userId, connectedAccounts.provider],
-      set: {
-        accessTokenCiphertext: accessCt,
-        refreshTokenCiphertext: refreshCt,
-        tokenExpiresAt: expiresAt,
-        scopes: tokens.scope ?? null,
-        status: 'active',
-        connectedAt: new Date(),
-      },
-    });
-
-  await db
-    .delete(oauthPendingStates)
-    .where(eq(oauthPendingStates.state, pending.state));
-
-  await sendHtml(
-    user.telegramId!,
-    `✅ <b>Zepto connected!</b>
-
-Now you can say things like:
-• <code>I'm craving Bournville</code>
-• <code>make paneer butter masala</code>
-• <code>order chips</code>
-
-I'll check your pantry first, then guide the Zepto order with buttons when something's missing 🛒`,
-    { inlineKeyboard: MAIN_MENU_KEYBOARD },
-  );
-
-  log.info(`Zepto connected (OOB) for user ${user.id}`);
+  log.info(`/connect_zepto redirect issued to ${ctx.user.telegramId}`);
   return true;
 }
 

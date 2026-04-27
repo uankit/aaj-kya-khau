@@ -54,8 +54,11 @@ export async function seedPantryFromZepto(userId: string): Promise<SeedResult> {
     }
     inputs.push({
       userId,
-      normalizedName: normalizeProductName(it.name),
-      rawName: it.name,
+      // normalized_name is varchar(100); some Zepto product titles
+      // ("Noise Buds Trance TWS Earbuds...") normalize past that even
+      // after brand-stripping. Hard cap to be safe.
+      normalizedName: normalizeProductName(it.name).slice(0, 100),
+      rawName: it.name.slice(0, 255),
       // Quantity is a free-form string in inventory_items. Keep it semantic.
       quantity: it.frequency >= 5 ? '1 unit' : '~0.5 unit',
       source: 'manual',

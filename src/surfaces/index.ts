@@ -1,16 +1,9 @@
 /**
  * Surface registry + delivery router.
  *
- * deliver(userId, content) is the single outbound entry point for domain
- * code (scheduler nudges, agent replies, workflow messages). It:
- *   1. Loads the user's primary_surface and bound external_id
- *   2. Picks the matching adapter
- *   3. Lowers content via adapter.send (or sendTemplate when needed — this
- *      is where the WhatsApp 24-hour-window policy will live)
- *
- * The user-resolution and template-vs-freeform decision logic is stubbed
- * for now; full implementation lands with the surface_bindings schema
- * (Step 4) and the WhatsApp template registry (later).
+ * Today: Telegram is the only chat surface. The adapter abstraction is
+ * preserved so adding another surface (Discord, Slack, etc.) later is
+ * mechanical.
  */
 
 import { telegramAdapter } from './telegram/adapter.js';
@@ -21,14 +14,12 @@ import {
   SurfaceError,
   type SurfaceName,
 } from './types.js';
-import { whatsappAdapter } from './whatsapp/adapter.js';
 
 export * from './types.js';
-export { telegramAdapter, whatsappAdapter };
+export { telegramAdapter };
 
 const adapters: Record<SurfaceName, SurfaceAdapter> = {
   telegram: telegramAdapter,
-  whatsapp: whatsappAdapter,
 };
 
 export function adapterFor(surface: SurfaceName): SurfaceAdapter {
@@ -38,10 +29,6 @@ export function adapterFor(surface: SurfaceName): SurfaceAdapter {
 /**
  * Deliver a message to a user. Resolves the user's primary surface and
  * routes through the right adapter.
- *
- * Today: callers pass `{ surface, externalId }` directly because we don't
- * have surface_bindings yet. After Step 4, this signature changes to
- * `(userId, content)` with internal lookup.
  */
 export async function deliver(
   target: { surface: SurfaceName; externalId: string },

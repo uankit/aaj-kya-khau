@@ -81,7 +81,8 @@ export interface PhaseError { phase: Phase; code: string; message: string; at: s
 export interface OrderState {
   kind: 'order_v3';
   phase: Phase;
-  queries: string[];
+  /** Original queries with requested quantities, in user-stated order. */
+  requests: OrderItemRequest[];
   unmatchedQueries: string[];
   address?: AddressState;
   cart?: CartLineState[];
@@ -92,15 +93,20 @@ export interface OrderState {
   updatedAt: string;
 }
 
+export interface OrderItemRequest {
+  query: string;
+  quantity: number;
+}
+
 export interface OrderTurnInput {
   userId: string;
   message: string;
   /**
-   * The intent classifier's orderQuery — a single phrase. We split it on
-   * conjunctions/commas locally for multi-item. If undefined, the message
-   * itself is treated as the query (rare path).
+   * Structured items from the intent classifier — one entry per distinct
+   * product the user wants, with quantity. If undefined or empty, this turn
+   * is treated as a confirmation / continuation of an existing workflow.
    */
-  orderQuery?: string;
+  orderItems?: OrderItemRequest[];
 }
 
 export interface WorkflowReply {
@@ -119,7 +125,7 @@ function blank(): OrderState {
   return {
     kind: 'order_v3',
     phase: 'new',
-    queries: [],
+    requests: [],
     unmatchedQueries: [],
     errors: [],
     trace: [],
@@ -203,14 +209,6 @@ function parseConfirm(text: string): 'yes' | 'no' | null {
   return null;
 }
 
-/** Split "milk, bread and eggs" → ["milk", "bread", "eggs"]. */
-export function splitQueries(raw: string): string[] {
-  return raw
-    .split(/\s*[,;]\s*|\s+(?:and|aur|&)\s+/i)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-    .slice(0, 12); // safety cap
-}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Reply formatters
@@ -300,20 +298,22 @@ async function buildCartAndPreview(
   state: OrderState,
   provider: GroceryProvider,
 ): Promise<{ ok: boolean; reply?: string }> {
-  if (state.queries.length === 0) {
+  if (state.requests.length === 0) {
     recordError(state, 'preparing_preview', 'no_queries', 'no queries to search');
     return { ok: false, reply: 'What would you like to order?' };
   }
 
-  // Search.
-  const groups = await provider.searchMany(userId, state.queries);
+  // Search by query, then zip back with the user-stated quantity by index.
+  const queries = state.requests.map((r) => r.query);
+  const groups = await provider.searchMany(userId, queries);
   const cart: CartLineState[] = [];
   const unmatched: string[] = [];
-  for (const g of groups) {
+  groups.forEach((g, idx) => {
+    const requested = state.requests[idx]?.quantity ?? 1;
     const top = pickBestProduct(g);
     if (!top) {
       unmatched.push(g.query);
-      continue;
+      return;
     }
     cart.push({
       query: g.query,
@@ -322,9 +322,9 @@ async function buildCartAndPreview(
       name: top.name,
       packSize: top.packSize,
       pricePaise: top.pricePaise,
-      quantity: 1,
+      quantity: requested,
     });
-  }
+  });
   state.cart = cart;
   state.unmatchedQueries = unmatched;
   trace(state, 'preparing_preview', `cart=${cart.length} unmatched=${unmatched.length}`);
@@ -433,10 +433,17 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
   let existingTask: AgentTask | undefined;
   if (restart) {
     state = blank();
-    const queries = splitQueries(input.orderQuery ?? message);
-    state.queries = queries;
+    state.requests = input.orderItems ?? [];
+    if (state.requests.length === 0) {
+      // Classifier didn't extract anything (rare — e.g. it labeled this as
+      // 'order' but couldn't pull a product). Bail out cleanly.
+      return {
+        text: 'What would you like to order? Tell me the items and quantities.',
+        finished: true,
+      };
+    }
     state.phase = 'ensure_address';
-    trace(state, 'ensure_address', `start queries=${JSON.stringify(queries)}`);
+    trace(state, 'ensure_address', `start requests=${JSON.stringify(state.requests)}`);
   } else {
     state = loaded!.state;
     existingTask = loaded!.task;

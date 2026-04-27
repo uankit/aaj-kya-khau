@@ -48,7 +48,7 @@ const DEFAULT_MEALS = [
 const DEFAULT_NIGHTLY = '22:00';
 
 const bindSchema = z.object({
-  surface: z.enum(['telegram', 'whatsapp']),
+  surface: z.enum(['telegram']),
 });
 
 function bindTokenString(): string {
@@ -140,19 +140,11 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
     });
 
     const base = env.PUBLIC_BASE_URL ?? `http://${request.headers.host ?? 'localhost:3000'}`;
-    let deepLink: string;
-    if (parsed.data.surface === 'telegram') {
-      // /start payload — Telegram passes it as the first /start arg.
-      const botUsername = await resolveTelegramBotUsername();
-      deepLink = botUsername
-        ? `https://t.me/${botUsername}?start=${token}`
-        : `${base}/api/bind/telegram-help?token=${token}`;
-    } else {
-      const num = (env.TWILIO_WHATSAPP_FROM ?? '').replace(/^whatsapp:/i, '').replace(/^\+/, '');
-      deepLink = num
-        ? `https://wa.me/${num}?text=${encodeURIComponent(`verify ${token}`)}`
-        : `${base}/api/bind/whatsapp-help?token=${token}`;
-    }
+    // /start payload — Telegram passes it as the first /start arg.
+    const botUsername = await resolveTelegramBotUsername();
+    const deepLink = botUsername
+      ? `https://t.me/${botUsername}?start=${token}`
+      : `${base}/api/bind/telegram-help?token=${token}`;
 
     log.info(`bind token issued for user=${u.id} surface=${parsed.data.surface}`);
     return reply.send({ token, deepLink, expiresAt });

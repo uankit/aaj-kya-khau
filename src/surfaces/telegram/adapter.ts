@@ -29,12 +29,6 @@ export const telegramAdapter: SurfaceAdapter = {
     // caller needs it for editing, refactor sendHtml to return it.
     return { messageId: '' };
   },
-
-  async sendTemplate(externalId, _templateName, _params): Promise<SendResult> {
-    // Telegram has no template system. Fall through to plain text send.
-    await sendHtml(externalId, _params.join(' '));
-    return { messageId: '' };
-  },
 };
 
 function renderHtml(content: OutboundContent): string {

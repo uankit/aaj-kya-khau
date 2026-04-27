@@ -3,13 +3,9 @@
  * incoming messages to a user.
  *
  * The web /api/me/bind/start endpoint mints a token and returns a deep
- * link. When the user opens that link and sends their first message:
- *   - Telegram: "/start <token>"
- *   - WhatsApp: "verify <token>" (case-insensitive)
- *
- * The webhook layer extracts the token, calls consumeBindToken, and
- * (on success) the user is now reachable via this surface for all
- * future messages.
+ * link. When the user opens that link and sends their first message
+ * ("/start <token>" on Telegram), we look up + consume the token to bind
+ * this chat to their existing web-onboarded user.
  */
 
 import { and, eq, gt, isNull } from 'drizzle-orm';
@@ -27,16 +23,9 @@ const log = createLogger('identity-bind');
 
 /** Pattern that Telegram '/start <token>' message bodies match. */
 const TG_START_RE = /^\/start(?:@\w+)?(?:\s+(\S+))?$/i;
-/** Pattern that WhatsApp first-message bodies match. */
-const WA_VERIFY_RE = /^\s*verify\s+(\S+)/i;
 
 export function extractTelegramBindToken(text: string): string | null {
   const m = TG_START_RE.exec(text.trim());
-  return m?.[1] ?? null;
-}
-
-export function extractWhatsAppBindToken(text: string): string | null {
-  const m = WA_VERIFY_RE.exec(text);
   return m?.[1] ?? null;
 }
 
