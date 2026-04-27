@@ -13,7 +13,8 @@ import { webhookCallback } from 'grammy';
 import { env } from '../config/env.js';
 import { db } from '../config/database.js';
 import { webhookDedup } from '../db/schema.js';
-import { bot, parseIncoming, sendText, type IncomingMessage } from '../surfaces/telegram/index.js';
+import { bot, parseIncoming, sendHtml, sendText, type IncomingMessage } from '../surfaces/telegram/index.js';
+import { consumeBindToken, extractTelegramBindToken } from '../domain/identity/bind.js';
 import { getOrCreateUserByTelegramId } from '../services/user.js';
 import { handleOnboardingMessage, sendCurrentPrompt } from '../onboarding/flow.js';
 import { handleTurn } from '../agent/agent.js';
@@ -170,7 +171,30 @@ function callbackDataToMessage(data: string): string | null {
   }
 }
 
+function escapeUserName(name: string | null): string {
+  return (name ?? 'there').replace(/[<>&]/g, (c) =>
+    c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;',
+  );
+}
+
 async function processMessage(incoming: IncomingMessage): Promise<void> {
+  // Web-first onboarding: /start <bind_token> binds an existing web-created
+  // user to this Telegram chat. Try this BEFORE auto-creating a Telegram
+  // user — once binding succeeds, the user already exists.
+  const bindToken = extractTelegramBindToken(incoming.body);
+  if (bindToken) {
+    const result = await consumeBindToken(bindToken, 'telegram', incoming.telegramId);
+    if (result) {
+      const greeting = result.fresh
+        ? `Hi ${escapeUserName(result.user.name)} 👋 You're all set on Telegram. What can I do?`
+        : `Welcome back. Telegram is still bound to your account.`;
+      await sendHtml(incoming.telegramId, greeting);
+      return;
+    }
+    // Token failed — fall through to plain /start handling so users with a
+    // typo / expired link still get a useful response.
+  }
+
   const { user, created } = await getOrCreateUserByTelegramId(incoming.telegramId);
 
   // Short-circuit specific slash commands (/start, /help, /mute, /feedback).

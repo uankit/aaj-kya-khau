@@ -586,3 +586,17 @@ export const oauthPendingStates = pgTable(
     createdAtIdx: index('oauth_pending_states_created_at_idx').on(table.createdAt),
   }),
 );
+
+/* ------------------------------------------------------------------ */
+/* Type exports for the new identity tables                           */
+/* ------------------------------------------------------------------ */
+
+export type SurfaceBinding = typeof surfaceBindings.$inferSelect;
+export type NewSurfaceBinding = typeof surfaceBindings.$inferInsert;
+export type BindToken = typeof bindTokens.$inferSelect;
+export type NewBindToken = typeof bindTokens.$inferInsert;
+export type MagicLinkToken = typeof magicLinkTokens.$inferSelect;
+export type WebSession = typeof webSessions.$inferSelect;
+
+/** Enum value type — 'telegram' | 'whatsapp'. */
+export type Surface = (typeof surfaceEnum.enumValues)[number];

@@ -23,6 +23,11 @@ import {
   validateTwilioSignature,
   type WhatsAppInbound,
 } from '../surfaces/whatsapp/inbound.js';
+import {
+  consumeBindToken,
+  extractWhatsAppBindToken,
+  findUserBySurface,
+} from '../domain/identity/bind.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('webhook-whatsapp');
@@ -57,18 +62,56 @@ async function processWhatsAppMessage(msg: WhatsAppInbound): Promise<void> {
     media: msg.numMedia,
   });
 
-  // TEMP: until surface_bindings + bind-token routing lands in Step 4-6,
-  // reply with a placeholder so we can confirm the round-trip works
-  // end-to-end against the live Twilio number.
+  // Web-first bind flow. If the message starts with "verify <token>", try
+  // to consume the bind token and link this WhatsApp number to the user
+  // who started onboarding on the web.
+  const bindToken = extractWhatsAppBindToken(msg.text);
+  if (bindToken) {
+    const result = await consumeBindToken(bindToken, 'whatsapp', msg.from);
+    if (result) {
+      const name = result.user.name ?? 'there';
+      try {
+        await whatsappAdapter.send(msg.from, {
+          kind: 'text',
+          text: result.fresh
+            ? `Hi ${name} 👋 You're all set on WhatsApp. What can I do?`
+            : `Welcome back. WhatsApp is still bound to your account.`,
+        });
+      } catch (err) {
+        log.error(`bind welcome send failed to ${msg.from}`, err);
+      }
+      return;
+    }
+    // Token failed — fall through so the user gets a useful nudge below.
+  }
+
+  // No bind token; resolve identity from existing surface binding.
+  const user = await findUserBySurface('whatsapp', msg.from);
+  if (!user) {
+    try {
+      await whatsappAdapter.send(msg.from, {
+        kind: 'text',
+        text:
+          "Hi! I don't recognize this number yet.\n\n" +
+          'Sign up first at https://aajkyakhaun.com/start, then click ' +
+          'the WhatsApp link at the end of onboarding to connect.',
+      });
+    } catch (err) {
+      log.error(`unknown-sender reply failed to ${msg.from}`, err);
+    }
+    return;
+  }
+
+  // Known user — placeholder echo until the agent loop is wired to surfaces
+  // (multi-item workflow lands in Step 8). Swapping this for handleTurn()
+  // is the one-line change that makes WhatsApp a first-class chat surface.
   try {
     await whatsappAdapter.send(msg.from, {
       kind: 'text',
-      text:
-        'Hi! WhatsApp connection is alive. Onboarding is moving to ' +
-        'the web — I\'ll send you a sign-up link once it ships.',
+      text: `Got it: "${msg.text.slice(0, 200)}"\n(agent integration coming next)`,
     });
   } catch (err) {
-    log.error(`reply failed to ${msg.from}`, err);
+    log.error(`echo reply failed to ${msg.from}`, err);
   }
 }
 
