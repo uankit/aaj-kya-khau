@@ -26,6 +26,7 @@ import { z } from 'zod';
 import { db } from '../config/database.js';
 import { env } from '../config/env.js';
 import { connectedAccounts, oauthPendingStates } from '../db/schema.js';
+import { seedPantryFromZepto } from '../domain/inventory/seed-from-zepto.js';
 import { encrypt } from '../utils/crypto.js';
 import {
   ZEPTO_POSTMAN_REDIRECT,
@@ -146,6 +147,14 @@ export async function zeptoOAuthRoutes(app: FastifyInstance): Promise<void> {
     await db.delete(oauthPendingStates).where(eq(oauthPendingStates.userId, u.id));
 
     log.info(`zepto connected for user=${u.id}`);
+
+    // Fire-and-forget pantry seed. The user shouldn't wait on a 30-order
+    // fetch + N inserts before the UI moves on; we 200 immediately and let
+    // it run in the background. Errors are logged, not surfaced.
+    seedPantryFromZepto(u.id).catch((err) => {
+      log.warn(`pantry seed failed for user=${u.id}`, err);
+    });
+
     return reply.send({ connected: true });
   });
 }
