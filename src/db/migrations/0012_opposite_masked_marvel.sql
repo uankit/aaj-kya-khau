@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "default_zepto_address_id" text;

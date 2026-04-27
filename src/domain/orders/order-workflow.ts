@@ -22,7 +22,7 @@
 
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { db } from '../../config/database.js';
-import { agentTasks, type AgentTask } from '../../db/schema.js';
+import { agentTasks, users, type AgentTask } from '../../db/schema.js';
 import {
   type GroceryProvider,
   GroceryProviderError,
@@ -44,6 +44,7 @@ const log = createLogger('order-workflow');
 export type Phase =
   | 'new'
   | 'ensure_address'
+  | 'await_address_choice'
   | 'preparing_preview'
   | 'await_confirm'
   | 'placing'
@@ -83,6 +84,8 @@ export interface OrderState {
   phase: Phase;
   /** Original queries with requested quantities, in user-stated order. */
   requests: OrderItemRequest[];
+  /** Pending address candidates while we wait for the user's pick. */
+  addressChoices?: AddressState[];
   unmatchedQueries: string[];
   address?: AddressState;
   cart?: CartLineState[];
@@ -265,25 +268,109 @@ function placedReply(state: OrderState): string {
 // Phases
 // ─────────────────────────────────────────────────────────────────────────
 
+/**
+ * Result discriminator for ensureAddress:
+ *   resolved → state.address is set, advance to next phase
+ *   awaiting → state.addressChoices is set, present picker, wait for user
+ *   failed   → set phase=failed, send reply
+ */
+type EnsureAddressResult =
+  | { kind: 'resolved' }
+  | { kind: 'awaiting'; reply: string }
+  | { kind: 'failed'; reply: string };
+
+const MAX_ADDRESS_CHOICES = 6;
+
 async function ensureAddress(
   userId: string,
   state: OrderState,
   provider: GroceryProvider,
-): Promise<{ ok: boolean; reply?: string }> {
-  if (state.address?.id) return { ok: true };
+): Promise<EnsureAddressResult> {
+  // Already resolved on this turn / a previous turn.
+  if (state.address?.id) return { kind: 'resolved' };
+
   const addresses = await provider.listAddresses(userId);
   if (addresses.length === 0) {
     recordError(state, 'ensure_address', 'no_address', 'no saved addresses');
     return {
-      ok: false,
+      kind: 'failed',
       reply: 'You have no saved delivery address on Zepto. Open the Zepto app, add one, then come back 🙏',
     };
   }
-  const chosen = addresses.find((a) => a.isDefault) ?? addresses[0]!;
-  await provider.selectAddress(userId, chosen.id);
-  state.address = { id: chosen.id, label: chosen.label };
-  trace(state, 'ensure_address', `selected ${chosen.id}`);
-  return { ok: true };
+
+  // Path 1: user has a saved default — use it silently.
+  const userRow = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { defaultZeptoAddressId: true },
+  });
+  const savedId = userRow?.defaultZeptoAddressId;
+  if (savedId) {
+    const match = addresses.find((a) => a.id === savedId);
+    if (match) {
+      await provider.selectAddress(userId, match.id);
+      state.address = { id: match.id, label: match.label };
+      trace(state, 'ensure_address', `using saved default ${match.id}`);
+      return { kind: 'resolved' };
+    }
+    // Saved ID no longer exists on Zepto — clear it and fall through.
+    await db.update(users).set({ defaultZeptoAddressId: null }).where(eq(users.id, userId));
+    trace(state, 'ensure_address', 'saved default not found in Zepto list; cleared');
+  }
+
+  // Path 2: only one saved address — auto-pick it AND save as default.
+  if (addresses.length === 1) {
+    const only = addresses[0]!;
+    await provider.selectAddress(userId, only.id);
+    state.address = { id: only.id, label: only.label };
+    await db
+      .update(users)
+      .set({ defaultZeptoAddressId: only.id })
+      .where(eq(users.id, userId));
+    trace(state, 'ensure_address', `auto-saved single address as default`);
+    return { kind: 'resolved' };
+  }
+
+  // Path 3: multiple addresses, no saved default — present picker.
+  const choices = addresses.slice(0, MAX_ADDRESS_CHOICES);
+  state.addressChoices = choices.map((a) => ({ id: a.id, label: a.label }));
+  trace(state, 'await_address_choice', `presenting ${choices.length} options`);
+  return {
+    kind: 'awaiting',
+    reply: presentAddressChoicesReply(choices, addresses.length),
+  };
+}
+
+function presentAddressChoicesReply(
+  shown: AddressState[],
+  totalAvailable: number,
+): string {
+  const lines = shown.map((a, i) => `${i + 1}. ${escapeHtml(a.label)}`);
+  const more =
+    totalAvailable > shown.length
+      ? `\n\n(${totalAvailable - shown.length} more on Zepto — pick one of these or open the Zepto app to manage)`
+      : '';
+  return [
+    `<b>Where should I deliver?</b>`,
+    '',
+    lines.join('\n'),
+    '',
+    `Reply with the number. I'll remember it for next time.${more}`,
+  ].join('\n');
+}
+
+function parseAddressChoice(text: string, optionCount: number): number | null {
+  const m = text.trim().match(/^(?:option\s*)?(\d+)\b/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (n >= 1 && n <= optionCount) return n;
+  return null;
+}
+
+async function persistDefaultAddress(userId: string, addressId: string): Promise<void> {
+  await db
+    .update(users)
+    .set({ defaultZeptoAddressId: addressId, updatedAt: new Date() })
+    .where(eq(users.id, userId));
 }
 
 function pickBestProduct(group: SearchGroup): ProductOption | null {
@@ -465,12 +552,36 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
   try {
     if (state.phase === 'ensure_address') {
       const r = await ensureAddress(userId, state, provider);
-      if (!r.ok) {
+      if (r.kind === 'failed') {
         state.phase = 'failed';
         await save(userId, state, existingTask);
-        return { text: r.reply ?? 'Address step failed.', finished: true };
+        return { text: r.reply, finished: true };
+      }
+      if (r.kind === 'awaiting') {
+        state.phase = 'await_address_choice';
+        await save(userId, state, existingTask);
+        return { text: r.reply };
       }
       state.phase = 'preparing_preview';
+    }
+
+    if (state.phase === 'await_address_choice') {
+      const choices = state.addressChoices ?? [];
+      const pick = parseAddressChoice(message, choices.length);
+      if (!pick) {
+        return {
+          text: `Reply with the number (1-${choices.length}) of the address to deliver to.`,
+        };
+      }
+      const chosen = choices[pick - 1]!;
+      await provider.selectAddress(userId, chosen.id);
+      state.address = chosen;
+      state.addressChoices = undefined;
+      await persistDefaultAddress(userId, chosen.id);
+      trace(state, 'await_address_choice', `picked ${chosen.id}; saved as default`);
+      state.phase = 'preparing_preview';
+      // Fall through to preparing_preview on the same turn — better UX than
+      // making the user wait another round-trip just to see the cart.
     }
 
     if (state.phase === 'preparing_preview') {

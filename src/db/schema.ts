@@ -79,6 +79,12 @@ export const users = pgTable(
     onboardingComplete: boolean('onboarding_complete').notNull().default(false),
     onboardingStep: onboardingStepEnum('onboarding_step').notNull().default('ask_name'),
     nightlySummaryAt: time('nightly_summary_at').notNull().default('22:00:00'),
+    /**
+     * The user's preferred Zepto delivery address ID, picked on first order.
+     * Subsequent orders use this silently; the user can change it via a
+     * mid-conversation override or (eventually) a /settings page.
+     */
+    defaultZeptoAddressId: text('default_zepto_address_id'),
     // Health profile (nullable — collected via agent, not onboarding)
     age: integer('age'),
     gender: genderEnum('gender'),
