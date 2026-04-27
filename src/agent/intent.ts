@@ -152,7 +152,7 @@ const orderItemSchema = z.object({
   quantity: z.number().int().positive().default(1),
 });
 
-const orderActionSchema = z.discriminatedUnion('action', [
+const orderActionInnerSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('confirm') }),
   z.object({ action: z.literal('cancel') }),
   z.object({
@@ -178,8 +178,9 @@ const orderActionSchema = z.discriminatedUnion('action', [
   /** User said something unrelated to the order — re-prompt. */
   z.object({ action: z.literal('noop') }),
 ]);
+const orderActionSchema = z.object({ result: orderActionInnerSchema });
 
-export type OrderAction = z.infer<typeof orderActionSchema>;
+export type OrderAction = z.infer<typeof orderActionInnerSchema>;
 
 export interface CartLineSummary {
   /** 1-based, matches what the user sees in the preview. */
@@ -218,7 +219,10 @@ Be tolerant of mixed languages (Hindi/Hinglish/English) and casual phrasing. Def
 // when the answer is ambiguous.
 // ─────────────────────────────────────────────────────────────────────────
 
-const disambigSchema = z.discriminatedUnion('kind', [
+// OpenAI's structured-output mode requires a top-level object schema; a
+// raw discriminatedUnion compiles to anyOf and gets rejected. We wrap and
+// unwrap the .result.
+const disambigInnerSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('confident'),
     /** 0-based index into the candidates array. */
@@ -231,8 +235,9 @@ const disambigSchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('no_match') }),
 ]);
+const disambigSchema = z.object({ result: disambigInnerSchema });
 
-export type Disambiguation = z.infer<typeof disambigSchema>;
+export type Disambiguation = z.infer<typeof disambigInnerSchema>;
 
 export interface DisambigCandidate {
   name: string;
@@ -281,8 +286,8 @@ export async function disambiguateSearchResults(
       temperature: 0,
       abortSignal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
     });
-    log.debug(`disambig "${query}" → ${object.kind}`);
-    return object;
+    log.debug(`disambig "${query}" → ${object.result.kind}`);
+    return object.result;
   } catch (err) {
     log.warn(`disambig failed for "${query}"; defaulting to confident-on-top`, err);
     return { kind: 'confident', pickIndex: 0 };
@@ -293,7 +298,7 @@ export async function disambiguateSearchResults(
 // Picking a candidate (for the await_line_choice phase).
 // ─────────────────────────────────────────────────────────────────────────
 
-const productChoiceSchema = z.discriminatedUnion('kind', [
+const productChoiceInnerSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('pick'),
     /** 1-based index as shown to the user. */
@@ -303,8 +308,9 @@ const productChoiceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('cancel') }),
   z.object({ kind: z.literal('noop') }),
 ]);
+const productChoiceSchema = z.object({ result: productChoiceInnerSchema });
 
-export type ProductChoice = z.infer<typeof productChoiceSchema>;
+export type ProductChoice = z.infer<typeof productChoiceInnerSchema>;
 
 const PRODUCT_CHOICE_SYSTEM = `The user is picking one option from a numbered product list to add to their cart. Return:
 - 'pick' + index (1-based): which option they chose. Match by number, by name (full or partial), or by description ("the kesar one", "second").
@@ -333,8 +339,8 @@ export async function classifyProductChoice(
       temperature: 0,
       abortSignal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
     });
-    log.debug(`product choice → ${object.kind}`);
-    return object;
+    log.debug(`product choice → ${object.result.kind}`);
+    return object.result;
   } catch (err) {
     log.warn('product choice classify failed; defaulting to noop', err);
     return { kind: 'noop' };
@@ -368,8 +374,8 @@ export async function classifyOrderAction(
       temperature: 0,
       abortSignal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
     });
-    log.debug(`order action=${object.action} "${text.slice(0, 60)}"`);
-    return object;
+    log.debug(`order action=${object.result.action} "${text.slice(0, 60)}"`);
+    return object.result;
   } catch (err) {
     log.warn('Order action classify failed; defaulting to noop', err);
     return { action: 'noop' };
