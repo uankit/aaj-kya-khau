@@ -126,7 +126,13 @@ export interface OrderState {
    * clobbered by a transient choice.
    */
   savePickAsDefault?: boolean;
-  unmatchedQueries: string[];
+  /**
+   * requestIndex → original query string for items Zepto returned no
+   * matches for. Tracked indexed (rather than as a flat string list) so
+   * mutations to state.requests can re-key it alongside resolvedProducts
+   * and pendingChoices.
+   */
+  unmatched?: Record<number, string>;
   address?: AddressState;
   cart?: CartLineState[];
   preview?: PreviewState;
@@ -169,11 +175,63 @@ function blank(): OrderState {
     kind: 'order_v3',
     phase: 'new',
     requests: [],
-    unmatchedQueries: [],
     errors: [],
     trace: [],
     updatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Drop request indices and re-key resolvedProducts / pendingChoices /
+ * unmatched so the remaining entries reference the new positions.
+ */
+function dropRequestIndices(state: OrderState, indicesToDrop: number[]): void {
+  const dropSet = new Set(indicesToDrop);
+  if (dropSet.size === 0) return;
+
+  // Old → new index mapping for surviving entries.
+  const remap: Record<number, number> = {};
+  let next = 0;
+  state.requests.forEach((_, oldIdx) => {
+    if (!dropSet.has(oldIdx)) remap[oldIdx] = next++;
+  });
+
+  state.requests = state.requests.filter((_, i) => !dropSet.has(i));
+
+  if (state.resolvedProducts) {
+    const out: Record<number, ResolvedProduct> = {};
+    for (const [k, v] of Object.entries(state.resolvedProducts)) {
+      const m = remap[Number(k)];
+      if (m !== undefined) out[m] = v;
+    }
+    state.resolvedProducts = out;
+  }
+  if (state.pendingChoices) {
+    state.pendingChoices = state.pendingChoices
+      .filter((p) => remap[p.requestIndex] !== undefined)
+      .map((p) => ({ ...p, requestIndex: remap[p.requestIndex]! }));
+  }
+  if (state.unmatched) {
+    const out: Record<number, string> = {};
+    for (const [k, v] of Object.entries(state.unmatched)) {
+      const m = remap[Number(k)];
+      if (m !== undefined) out[m] = v;
+    }
+    state.unmatched = out;
+  }
+}
+
+/**
+ * Invalidate every product resolution. Called when the store context
+ * changes (address pick) — Zepto's storeProductId values are store-scoped
+ * so cached resolutions can't be reused against a new store.
+ */
+function invalidateProductResolutions(state: OrderState): void {
+  state.resolvedProducts = {};
+  state.pendingChoices = [];
+  state.unmatched = {};
+  state.cart = undefined;
+  state.preview = undefined;
 }
 
 function isOrderState(s: unknown): s is OrderState {
@@ -334,6 +392,9 @@ async function offerAddressChange(
   state.addressChoices = choices.map((a) => ({ id: a.id, label: a.label }));
   state.savePickAsDefault = false; // one-time override, not a default change
   state.address = undefined;
+  // Different store after the user picks → product IDs are store-scoped, so
+  // every existing resolution must be re-searched.
+  invalidateProductResolutions(state);
   state.phase = 'await_address_choice';
   trace(state, 'await_address_choice', `offering change among ${choices.length}`);
   await save(userId, state, existingTask);
@@ -474,8 +535,9 @@ function presentPreviewReply(state: OrderState): string {
 
   const addr = state.address?.label ? ` to ${escapeHtml(state.address.label)}` : '';
   const eta = pre.etaMinutes ? `\n⏱ ETA ~${pre.etaMinutes} min` : '';
-  const unmatched = state.unmatchedQueries.length
-    ? `\n\n⚠️ Couldn't find: ${state.unmatchedQueries.map(escapeHtml).join(', ')}`
+  const unmatchedList = Object.values(state.unmatched ?? {});
+  const unmatched = unmatchedList.length
+    ? `\n\n⚠️ Couldn't find: ${unmatchedList.map(escapeHtml).join(', ')}`
     : '';
 
   return [
@@ -641,96 +703,116 @@ async function searchAndDisambiguate(
     return { ok: false, reply: 'What would you like to order?' };
   }
 
-  // Reset derived state for a fresh build.
-  state.resolvedProducts = {};
-  state.pendingChoices = [];
-  state.unmatchedQueries = [];
-  state.cart = undefined;
-  state.preview = undefined;
+  state.resolvedProducts = state.resolvedProducts ?? {};
+  state.pendingChoices = state.pendingChoices ?? [];
+  state.unmatched = state.unmatched ?? {};
+  // cart + preview will be rebuilt by assemblePreview; safe to leave stale.
 
-  const queries = state.requests.map((r) => r.query);
-  const groups = await provider.searchMany(userId, queries);
-
-  for (let idx = 0; idx < groups.length; idx++) {
-    const g = groups[idx]!;
-    const orderable = g.products.filter(
-      (p) => p.productVariantId && p.storeProductId,
-    );
-    if (orderable.length === 0) {
-      state.unmatchedQueries.push(g.query);
-      continue;
+  // Incremental: only search request indices that don't already have a
+  // resolution / pending choice / unmatched mark from a prior turn.
+  const pendingIndices = new Set(state.pendingChoices.map((p) => p.requestIndex));
+  const resolvedIndices = new Set(
+    Object.keys(state.resolvedProducts).map((k) => Number(k)),
+  );
+  const unmatchedIndices = new Set(
+    Object.keys(state.unmatched).map((k) => Number(k)),
+  );
+  const indicesToSearch: number[] = [];
+  state.requests.forEach((_r, idx) => {
+    if (
+      !resolvedIndices.has(idx) &&
+      !pendingIndices.has(idx) &&
+      !unmatchedIndices.has(idx)
+    ) {
+      indicesToSearch.push(idx);
     }
+  });
 
-    // Deduplicate by productVariantId so the disambiguator doesn't see the
-    // same SKU listed twice (Zepto often returns two storeProductId rows
-    // for the same variant when multiple slots stock it).
-    const seen = new Set<string>();
-    const unique: ProductOption[] = [];
-    for (const p of orderable) {
-      if (!seen.has(p.productVariantId)) {
-        seen.add(p.productVariantId);
-        unique.push(p);
+  if (indicesToSearch.length > 0) {
+    const queries = indicesToSearch.map((i) => state.requests[i]!.query);
+    const groups = await provider.searchMany(userId, queries);
+
+    for (let k = 0; k < groups.length; k++) {
+      const idx = indicesToSearch[k]!;
+      const g = groups[k]!;
+      const orderable = g.products.filter(
+        (p) => p.productVariantId && p.storeProductId,
+      );
+      if (orderable.length === 0) {
+        state.unmatched[idx] = g.query;
+        continue;
       }
-    }
 
-    const decision = await disambiguateSearchResults(
-      g.query,
-      unique.map((p) => ({
-        name: p.name,
-        packSize: p.packSize,
-        pricePaise: p.pricePaise,
-      })),
-    );
+      // Deduplicate by productVariantId so the disambiguator doesn't see the
+      // same SKU listed twice (Zepto often returns two storeProductId rows
+      // for the same variant when multiple slots stock it).
+      const seen = new Set<string>();
+      const unique: ProductOption[] = [];
+      for (const p of orderable) {
+        if (!seen.has(p.productVariantId)) {
+          seen.add(p.productVariantId);
+          unique.push(p);
+        }
+      }
 
-    if (decision.kind === 'no_match') {
-      state.unmatchedQueries.push(g.query);
-      continue;
+      const decision = await disambiguateSearchResults(
+        g.query,
+        unique.map((p) => ({
+          name: p.name,
+          packSize: p.packSize,
+          pricePaise: p.pricePaise,
+        })),
+      );
+
+      if (decision.kind === 'no_match') {
+        state.unmatched[idx] = g.query;
+        continue;
+      }
+      if (decision.kind === 'confident') {
+        const pick = unique[decision.pickIndex] ?? unique[0]!;
+        state.resolvedProducts[idx] = toResolved(pick);
+        continue;
+      }
+      const candidates = decision.showIndices
+        .slice(0, MAX_CHOICE_CANDIDATES)
+        .map((i) => unique[i])
+        .filter((p): p is ProductOption => p !== undefined)
+        .map(toResolved);
+      if (candidates.length === 0) {
+        state.resolvedProducts[idx] = toResolved(unique[0]!);
+        continue;
+      }
+      state.pendingChoices.push({
+        requestIndex: idx,
+        query: g.query,
+        candidates,
+      });
     }
-    if (decision.kind === 'confident') {
-      const pick = unique[decision.pickIndex] ?? unique[0]!;
-      state.resolvedProducts[idx] = toResolved(pick);
-      continue;
-    }
-    // ambiguous → queue for user choice (top N indices, capped)
-    const candidates = decision.showIndices
-      .slice(0, MAX_CHOICE_CANDIDATES)
-      .map((i) => unique[i])
-      .filter((p): p is ProductOption => p !== undefined)
-      .map(toResolved);
-    if (candidates.length === 0) {
-      // shouldn't happen, but fall back to top-1 confident.
-      state.resolvedProducts[idx] = toResolved(unique[0]!);
-      continue;
-    }
-    state.pendingChoices.push({
-      requestIndex: idx,
-      query: g.query,
-      candidates,
-    });
   }
 
   trace(
     state,
     'preparing_preview',
     `resolved=${Object.keys(state.resolvedProducts).length} ` +
-      `pending=${state.pendingChoices.length} unmatched=${state.unmatchedQueries.length}`,
+      `pending=${state.pendingChoices.length} ` +
+      `unmatched=${Object.keys(state.unmatched).length} ` +
+      `searched=${indicesToSearch.length}`,
   );
 
-  // If nothing matched at all, bail.
+  // If nothing matched at all (every request unmatched), bail.
   const totalMatched =
     Object.keys(state.resolvedProducts).length + state.pendingChoices.length;
   if (totalMatched === 0) {
+    const all = Object.values(state.unmatched);
     recordError(
       state,
       'preparing_preview',
       'all_unmatched',
-      `nothing matched: ${state.unmatchedQueries.join(', ')}`,
+      `nothing matched: ${all.join(', ')}`,
     );
     return {
       ok: false,
-      reply: `Couldn't find any of: <b>${state.unmatchedQueries
-        .map(escapeHtml)
-        .join(', ')}</b>. Try more specific names.`,
+      reply: `Couldn't find any of: <b>${all.map(escapeHtml).join(', ')}</b>. Try more specific names.`,
     };
   }
   return { ok: true };
@@ -990,7 +1072,8 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
         };
       }
       if (choice.kind === 'skip') {
-        state.unmatchedQueries.push(pending.query);
+        state.unmatched = state.unmatched ?? {};
+        state.unmatched[pending.requestIndex] = pending.query;
         state.pendingChoices = state.pendingChoices?.slice(1);
         trace(state, 'await_line_choice', `skipped ${pending.query}`);
       } else {
@@ -1098,7 +1181,7 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
             text: 'I couldn\'t map that to a cart line. Mention the item name or its number from the list.',
           };
         }
-        state.requests = state.requests.filter((_, i) => !requestIndices.includes(i));
+        dropRequestIndices(state, requestIndices);
         if (state.requests.length === 0) {
           state.phase = 'cancelled';
           trace(state, 'cancelled', 'all lines removed');
@@ -1113,26 +1196,20 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
       }
 
       if (action.action === 'set_quantity') {
-        let zeroedAll = true;
-        const toRemove = new Set<number>();
+        const toRemove: number[] = [];
         for (const change of action.changes) {
           const cartIdx = change.lineIndex - 1;
           const cartLine = state.cart?.[cartIdx];
           if (!cartLine) continue;
           if (change.quantity === 0) {
-            toRemove.add(cartLine.requestIndex);
+            toRemove.push(cartLine.requestIndex);
           } else {
             const req = state.requests[cartLine.requestIndex];
-            if (req) {
-              req.quantity = change.quantity;
-              zeroedAll = false;
-            }
+            if (req) req.quantity = change.quantity;
           }
         }
-        if (toRemove.size > 0) {
-          state.requests = state.requests.filter((_, i) => !toRemove.has(i));
-        }
-        if (state.requests.length === 0 && zeroedAll) {
+        if (toRemove.length > 0) dropRequestIndices(state, toRemove);
+        if (state.requests.length === 0) {
           state.phase = 'cancelled';
           trace(state, 'cancelled', 'all qty set to 0');
           await save(userId, state, existingTask);
