@@ -81,6 +81,12 @@ export interface OrderPreview {
   /** Sum of all charges including taxes. Source of truth for the user-shown total. */
   totalPaise: number;
   etaMinutes?: number;
+  /**
+   * Whether the provider says this address+cart is deliverable right now.
+   * If false the workflow should NOT proceed to placement — it surfaces a
+   * "store unserviceable" message instead.
+   */
+  deliverable: boolean;
   /** If the provider needs an extra step (e.g. drop zone selection), surfaced here. */
   requiresDropZone?: { availableSlots: string[] };
 }

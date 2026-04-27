@@ -299,6 +299,7 @@ export const zeptoProvider: GroceryProvider = {
       taxes?: number | null;
       toPayAmount?: number | null;
       etaInMinutes?: number | null;
+      deliverable?: boolean;
       items?: Array<{ price?: number | null; quantity?: number | null }>;
       dropZoneRequired?: boolean;
       dropZoneConfig?: { slots?: Array<{ value: string }> };
@@ -327,6 +328,9 @@ export const zeptoProvider: GroceryProvider = {
       handlingFeePaise: handlingFee,
       totalPaise: total,
       etaMinutes: s.etaInMinutes ?? undefined,
+      // Treat missing `deliverable` as true — older Zepto responses didn't
+      // include the field. Only an explicit false blocks placement.
+      deliverable: s.deliverable !== false,
       requiresDropZone,
     };
   },

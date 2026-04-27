@@ -208,6 +208,139 @@ When the user mentions products NOT currently in the cart, treat as 'add'.
 
 Be tolerant of mixed languages (Hindi/Hinglish/English) and casual phrasing. Default to 'noop' only when truly ambiguous — never fabricate cart lines that don't exist.`;
 
+// ─────────────────────────────────────────────────────────────────────────
+// Search-result disambiguation.
+//
+// After Zepto search returns N candidates for a user query, we ask the LLM
+// whether the top match is unambiguous ("amul gold milk 500ml" → exactly
+// one product) or whether multiple candidates plausibly match a generic
+// query ("nic ice cream" → 8 flavors). The workflow asks the user only
+// when the answer is ambiguous.
+// ─────────────────────────────────────────────────────────────────────────
+
+const disambigSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('confident'),
+    /** 0-based index into the candidates array. */
+    pickIndex: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal('ambiguous'),
+    /** 0-based indices to show the user, ranked best first. 2-5 entries. */
+    showIndices: z.array(z.number().int().nonnegative()).min(2).max(5),
+  }),
+  z.object({ kind: z.literal('no_match') }),
+]);
+
+export type Disambiguation = z.infer<typeof disambigSchema>;
+
+export interface DisambigCandidate {
+  name: string;
+  packSize: string;
+  pricePaise: number;
+}
+
+const DISAMBIG_SYSTEM = `Decide whether a user's product search query has a clear winner among candidate Zepto products, or whether the user should pick.
+
+Return exactly one of:
+- 'confident' + pickIndex: ONE candidate clearly matches what the user asked. Brand + product + size all line up; or all candidates are duplicates / different sellers of the same SKU. Use this when there's no real ambiguity.
+- 'ambiguous' + showIndices: 2-5 distinct SKUs plausibly match (different flavors, sub-brands, or sizes). Rank by relevance, best first. The user will pick.
+- 'no_match': none of the candidates actually match the user's query.
+
+Heuristics:
+- If candidates collapse to 1 unique product (same name repeated), it's 'confident'.
+- If the user query is specific ("amul gold milk 500ml", "lay's magic masala chips") → 'confident' on the matching candidate.
+- If the user query is generic ("ice cream", "chips", "milk") and candidates are genuinely different products → 'ambiguous'.
+- If the user query has a brand but no flavor/variant ("nic ice cream", "grameen kulfi") and candidates show distinct flavors → 'ambiguous'.
+- Be conservative: prefer 'confident' when the top candidate is clearly the right thing.
+
+Treat duplicate candidates (same name) as one — never show duplicates to the user.`;
+
+export async function disambiguateSearchResults(
+  query: string,
+  candidates: DisambigCandidate[],
+): Promise<Disambiguation> {
+  if (candidates.length === 0) return { kind: 'no_match' };
+  if (candidates.length === 1) return { kind: 'confident', pickIndex: 0 };
+
+  const block = candidates
+    .map(
+      (c, i) =>
+        `${i}. ${c.name}${c.packSize ? ` · ${c.packSize}` : ''}${
+          c.pricePaise ? ` · ₹${(c.pricePaise / 100).toFixed(0)}` : ''
+        }`,
+    )
+    .join('\n');
+
+  try {
+    const { object } = await generateObject({
+      model,
+      schema: disambigSchema,
+      system: DISAMBIG_SYSTEM,
+      prompt: `USER QUERY: ${query}\n\nCANDIDATES:\n${block}`,
+      temperature: 0,
+      abortSignal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
+    });
+    log.debug(`disambig "${query}" → ${object.kind}`);
+    return object;
+  } catch (err) {
+    log.warn(`disambig failed for "${query}"; defaulting to confident-on-top`, err);
+    return { kind: 'confident', pickIndex: 0 };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Picking a candidate (for the await_line_choice phase).
+// ─────────────────────────────────────────────────────────────────────────
+
+const productChoiceSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('pick'),
+    /** 1-based index as shown to the user. */
+    index: z.number().int().positive(),
+  }),
+  z.object({ kind: z.literal('skip') }),
+  z.object({ kind: z.literal('cancel') }),
+  z.object({ kind: z.literal('noop') }),
+]);
+
+export type ProductChoice = z.infer<typeof productChoiceSchema>;
+
+const PRODUCT_CHOICE_SYSTEM = `The user is picking one option from a numbered product list to add to their cart. Return:
+- 'pick' + index (1-based): which option they chose. Match by number, by name (full or partial), or by description ("the kesar one", "second").
+- 'skip': they want to drop this query and move on without buying it ("skip", "leave it", "no thanks for this one", "remove from cart").
+- 'cancel': they want to abort the whole order ("cancel order", "stop everything").
+- 'noop': unrelated / ambiguous.`;
+
+export async function classifyProductChoice(
+  message: string,
+  options: { name: string; pricePaise: number }[],
+): Promise<ProductChoice> {
+  const text = message.trim();
+  if (text.length === 0) return { kind: 'noop' };
+  const block = options
+    .map(
+      (o, i) =>
+        `${i + 1}. ${o.name}${o.pricePaise ? ` (₹${(o.pricePaise / 100).toFixed(0)})` : ''}`,
+    )
+    .join('\n');
+  try {
+    const { object } = await generateObject({
+      model,
+      schema: productChoiceSchema,
+      system: PRODUCT_CHOICE_SYSTEM,
+      prompt: `OPTIONS:\n${block}\n\nUSER MESSAGE: ${text}`,
+      temperature: 0,
+      abortSignal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
+    });
+    log.debug(`product choice → ${object.kind}`);
+    return object;
+  } catch (err) {
+    log.warn('product choice classify failed; defaulting to noop', err);
+    return { kind: 'noop' };
+  }
+}
+
 export async function classifyOrderAction(
   message: string,
   cart: CartLineSummary[],

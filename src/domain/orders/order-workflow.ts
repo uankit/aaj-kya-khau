@@ -23,14 +23,18 @@
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { db } from '../../config/database.js';
 import { agentTasks, users, type AgentTask } from '../../db/schema.js';
-import { classifyOrderAction, type CartLineSummary } from '../../agent/intent.js';
+import {
+  classifyOrderAction,
+  classifyProductChoice,
+  disambiguateSearchResults,
+  type CartLineSummary,
+} from '../../agent/intent.js';
 import {
   type GroceryProvider,
   GroceryProviderError,
   GroceryProviderNotConnectedError,
   type OrderPreview,
   type ProductOption,
-  type SearchGroup,
 } from '../../providers/grocery/index.js';
 import { getGroceryProvider } from '../../providers/grocery/index.js';
 import { escapeHtml } from '../../utils/html.js';
@@ -47,6 +51,7 @@ export type Phase =
   | 'ensure_address'
   | 'await_address_choice'
   | 'preparing_preview'
+  | 'await_line_choice'
   | 'await_confirm'
   | 'placing'
   | 'completed'
@@ -77,10 +82,27 @@ export interface PreviewState {
   handlingFeePaise: number;
   totalPaise: number;
   etaMinutes?: number;
+  deliverable: boolean;
 }
 
 export interface PhaseTrace { phase: Phase; action: string; at: string; }
 export interface PhaseError { phase: Phase; code: string; message: string; at: string; }
+
+export interface ResolvedProduct {
+  productVariantId: string;
+  storeProductId: string;
+  cartProductId: string | null;
+  name: string;
+  packSize: string;
+  pricePaise: number;
+}
+
+export interface PendingChoice {
+  /** Index into state.requests this choice resolves. */
+  requestIndex: number;
+  query: string;
+  candidates: ResolvedProduct[];
+}
 
 export interface OrderState {
   kind: 'order_v3';
@@ -89,6 +111,13 @@ export interface OrderState {
   requests: OrderItemRequest[];
   /** Pending address candidates while we wait for the user's pick. */
   addressChoices?: AddressState[];
+  /**
+   * Confirmed product per requestIndex — accumulates from confident matches
+   * and from the user's pick during await_line_choice. Cleared on rebuild.
+   */
+  resolvedProducts?: Record<number, ResolvedProduct>;
+  /** Queue of ambiguous queries waiting on the user. Front is the active one. */
+  pendingChoices?: PendingChoice[];
   unmatchedQueries: string[];
   address?: AddressState;
   cart?: CartLineState[];
@@ -232,8 +261,9 @@ function mapTargetLinesToRequestIndices(state: OrderState, targetLines: number[]
 }
 
 /**
- * Rebuild the cart + live preview after a state.requests mutation, save,
- * and return the new preview reply for the user. Stays in await_confirm.
+ * Rebuild the cart + live preview after a state.requests mutation. If any
+ * line is ambiguous, transitions to await_line_choice and presents the
+ * picker. Otherwise stays in await_confirm and shows the priced preview.
  */
 async function rebuildAndPresent(
   userId: string,
@@ -247,8 +277,40 @@ async function rebuildAndPresent(
     await save(userId, state, existingTask);
     return { text: r.reply ?? 'Could not rebuild preview.', finished: true };
   }
+  if (r.needsChoice) {
+    state.phase = 'await_line_choice';
+    await save(userId, state, existingTask);
+    return { text: presentLineChoiceReply(state) };
+  }
+  if (state.preview && !state.preview.deliverable) {
+    state.phase = 'failed';
+    recordError(state, 'preparing_preview', 'unserviceable', 'preview deliverable=false');
+    await save(userId, state, existingTask);
+    return { text: presentUnserviceableReply(state), finished: true };
+  }
+  state.phase = 'await_confirm';
   await save(userId, state, existingTask);
   return { text: presentPreviewReply(state) };
+}
+
+function presentLineChoiceReply(state: OrderState): string {
+  const pending = state.pendingChoices?.[0];
+  if (!pending) return 'No pending choices.';
+  const lines = pending.candidates.map((c, i) => {
+    const meta: string[] = [];
+    if (c.packSize) meta.push(escapeHtml(c.packSize));
+    if (c.pricePaise) meta.push(`<b>${rupees(c.pricePaise)}</b>`);
+    return `${i + 1}. ${escapeHtml(c.name)}${meta.length ? ' · ' + meta.join(' · ') : ''}`;
+  });
+  const remaining = (state.pendingChoices?.length ?? 1) - 1;
+  const tail = remaining > 0 ? `\n\n(${remaining} more line${remaining === 1 ? '' : 's'} after this)` : '';
+  return [
+    `Multiple matches for <b>${escapeHtml(pending.query)}</b>:`,
+    '',
+    lines.join('\n'),
+    '',
+    `Reply with the number to pick, or <i>skip</i> to drop this item.${tail}`,
+  ].join('\n');
 }
 
 
@@ -259,6 +321,17 @@ async function rebuildAndPresent(
 function rupees(paise: number): string {
   if (paise === 0) return '₹0';
   return `₹${(paise / 100).toFixed(paise % 100 === 0 ? 0 : 2)}`;
+}
+
+function presentUnserviceableReply(state: OrderState): string {
+  const addr = state.address?.label
+    ? ` to <b>${escapeHtml(state.address.label)}</b>`
+    : '';
+  return [
+    `Zepto says it can't deliver${addr} right now (store unserviceable or out of hours).`,
+    '',
+    `Try a different address — say <i>change address</i> or open the Zepto app to pick one that's serviceable.`,
+  ].join('\n');
 }
 
 function presentPreviewReply(state: OrderState): string {
@@ -409,14 +482,30 @@ async function persistDefaultAddress(userId: string, addressId: string): Promise
     .where(eq(users.id, userId));
 }
 
-function pickBestProduct(group: SearchGroup): ProductOption | null {
-  for (const p of group.products) {
-    if (p.available && p.productVariantId && p.storeProductId) return p;
-  }
-  return group.products[0] ?? null;
+/**
+ * Maximum candidates we'll show the user when disambiguating one line.
+ * Anything more is overwhelming on a chat surface.
+ */
+const MAX_CHOICE_CANDIDATES = 3;
+
+function toResolved(p: ProductOption): ResolvedProduct {
+  return {
+    productVariantId: p.productVariantId,
+    storeProductId: p.storeProductId,
+    cartProductId: p.cartProductId,
+    name: p.name,
+    packSize: p.packSize,
+    pricePaise: p.pricePaise,
+  };
 }
 
-async function buildCartAndPreview(
+/**
+ * Stage 1 of cart construction. Search Zepto for every request, then run
+ * the LLM disambiguator per group. Confident matches accumulate in
+ * state.resolvedProducts. Ambiguous ones queue up in state.pendingChoices
+ * for the await_line_choice phase to resolve one at a time.
+ */
+async function searchAndDisambiguate(
   userId: string,
   state: OrderState,
   provider: GroceryProvider,
@@ -426,42 +515,137 @@ async function buildCartAndPreview(
     return { ok: false, reply: 'What would you like to order?' };
   }
 
-  // Search by query, then zip back with the user-stated quantity by index.
+  // Reset derived state for a fresh build.
+  state.resolvedProducts = {};
+  state.pendingChoices = [];
+  state.unmatchedQueries = [];
+  state.cart = undefined;
+  state.preview = undefined;
+
   const queries = state.requests.map((r) => r.query);
   const groups = await provider.searchMany(userId, queries);
-  const cart: CartLineState[] = [];
-  const unmatched: string[] = [];
-  groups.forEach((g, idx) => {
-    const requested = state.requests[idx]?.quantity ?? 1;
-    const top = pickBestProduct(g);
-    if (!top) {
-      unmatched.push(g.query);
-      return;
+
+  for (let idx = 0; idx < groups.length; idx++) {
+    const g = groups[idx]!;
+    const orderable = g.products.filter(
+      (p) => p.productVariantId && p.storeProductId,
+    );
+    if (orderable.length === 0) {
+      state.unmatchedQueries.push(g.query);
+      continue;
     }
-    cart.push({
+
+    // Deduplicate by productVariantId so the disambiguator doesn't see the
+    // same SKU listed twice (Zepto often returns two storeProductId rows
+    // for the same variant when multiple slots stock it).
+    const seen = new Set<string>();
+    const unique: ProductOption[] = [];
+    for (const p of orderable) {
+      if (!seen.has(p.productVariantId)) {
+        seen.add(p.productVariantId);
+        unique.push(p);
+      }
+    }
+
+    const decision = await disambiguateSearchResults(
+      g.query,
+      unique.map((p) => ({
+        name: p.name,
+        packSize: p.packSize,
+        pricePaise: p.pricePaise,
+      })),
+    );
+
+    if (decision.kind === 'no_match') {
+      state.unmatchedQueries.push(g.query);
+      continue;
+    }
+    if (decision.kind === 'confident') {
+      const pick = unique[decision.pickIndex] ?? unique[0]!;
+      state.resolvedProducts[idx] = toResolved(pick);
+      continue;
+    }
+    // ambiguous → queue for user choice (top N indices, capped)
+    const candidates = decision.showIndices
+      .slice(0, MAX_CHOICE_CANDIDATES)
+      .map((i) => unique[i])
+      .filter((p): p is ProductOption => p !== undefined)
+      .map(toResolved);
+    if (candidates.length === 0) {
+      // shouldn't happen, but fall back to top-1 confident.
+      state.resolvedProducts[idx] = toResolved(unique[0]!);
+      continue;
+    }
+    state.pendingChoices.push({
       requestIndex: idx,
       query: g.query,
-      productVariantId: top.productVariantId,
-      storeProductId: top.storeProductId,
-      name: top.name,
-      packSize: top.packSize,
-      pricePaise: top.pricePaise,
-      quantity: requested,
+      candidates,
+    });
+  }
+
+  trace(
+    state,
+    'preparing_preview',
+    `resolved=${Object.keys(state.resolvedProducts).length} ` +
+      `pending=${state.pendingChoices.length} unmatched=${state.unmatchedQueries.length}`,
+  );
+
+  // If nothing matched at all, bail.
+  const totalMatched =
+    Object.keys(state.resolvedProducts).length + state.pendingChoices.length;
+  if (totalMatched === 0) {
+    recordError(
+      state,
+      'preparing_preview',
+      'all_unmatched',
+      `nothing matched: ${state.unmatchedQueries.join(', ')}`,
+    );
+    return {
+      ok: false,
+      reply: `Couldn't find any of: <b>${state.unmatchedQueries
+        .map(escapeHtml)
+        .join(', ')}</b>. Try more specific names.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Stage 2 of cart construction. All requests resolved (no pendingChoices).
+ * Build CartLineState[] from resolvedProducts, push to provider, fetch
+ * priced preview.
+ */
+async function assemblePreview(
+  userId: string,
+  state: OrderState,
+  provider: GroceryProvider,
+): Promise<{ ok: boolean; reply?: string }> {
+  const resolved = state.resolvedProducts ?? {};
+  const cart: CartLineState[] = [];
+  state.requests.forEach((req, idx) => {
+    const r = resolved[idx];
+    if (!r) return; // unmatched / skipped
+    cart.push({
+      requestIndex: idx,
+      query: req.query,
+      productVariantId: r.productVariantId,
+      storeProductId: r.storeProductId,
+      name: r.name,
+      packSize: r.packSize,
+      pricePaise: r.pricePaise,
+      quantity: req.quantity,
     });
   });
   state.cart = cart;
-  state.unmatchedQueries = unmatched;
-  trace(state, 'preparing_preview', `cart=${cart.length} unmatched=${unmatched.length}`);
 
   if (cart.length === 0) {
-    recordError(state, 'preparing_preview', 'all_unmatched', `nothing matched: ${unmatched.join(', ')}`);
+    recordError(state, 'preparing_preview', 'empty_cart', 'no resolved lines');
     return {
       ok: false,
-      reply: `Couldn't find any of: <b>${unmatched.map(escapeHtml).join(', ')}</b>. Try a more specific name or check spelling.`,
+      reply: 'Cart ended up empty. Tell me what to order again?',
     };
   }
 
-  // Stage cart on the provider.
   const cartResult = await provider.upsertCart(
     userId,
     cart.map((l) => ({
@@ -474,7 +658,6 @@ async function buildCartAndPreview(
     { replace: true },
   );
 
-  // Live preview with fees.
   let preview: OrderPreview;
   try {
     preview = await provider.previewOrder(userId, {
@@ -496,9 +679,28 @@ async function buildCartAndPreview(
     handlingFeePaise: preview.handlingFeePaise,
     totalPaise: preview.totalPaise,
     etaMinutes: preview.etaMinutes,
+    deliverable: preview.deliverable,
   };
-  trace(state, 'preparing_preview', `total=${preview.totalPaise}`);
+  trace(state, 'preparing_preview', `total=${preview.totalPaise} deliverable=${preview.deliverable}`);
   return { ok: true };
+}
+
+/**
+ * Replaces the legacy buildCartAndPreview entry point. Tries to fully
+ * resolve all lines and price the cart. If any line is ambiguous, returns
+ * { needsChoice: true } so the orchestrator can flip to await_line_choice.
+ */
+async function buildCartAndPreview(
+  userId: string,
+  state: OrderState,
+  provider: GroceryProvider,
+): Promise<{ ok: boolean; reply?: string; needsChoice?: boolean }> {
+  const search = await searchAndDisambiguate(userId, state, provider);
+  if (!search.ok) return search;
+  if ((state.pendingChoices ?? []).length > 0) {
+    return { ok: true, needsChoice: true };
+  }
+  return assemblePreview(userId, state, provider);
 }
 
 async function placeOrder(
@@ -611,11 +813,67 @@ export async function runOrderTurn(input: OrderTurnInput): Promise<WorkflowReply
     }
 
     if (state.phase === 'preparing_preview') {
-      const r = await buildCartAndPreview(userId, state, provider);
+      return rebuildAndPresent(userId, state, provider, existingTask);
+    }
+
+    if (state.phase === 'await_line_choice') {
+      const pending = state.pendingChoices?.[0];
+      if (!pending) {
+        // Defensive — no pending choice but we're in this phase. Try to
+        // recover by re-running preview.
+        return rebuildAndPresent(userId, state, provider, existingTask);
+      }
+      const choice = await classifyProductChoice(
+        message,
+        pending.candidates.map((c) => ({ name: c.name, pricePaise: c.pricePaise })),
+      );
+      if (choice.kind === 'cancel') {
+        state.phase = 'cancelled';
+        trace(state, 'cancelled', 'user cancelled at line choice');
+        await save(userId, state, existingTask);
+        return { text: 'Cancelled. No order placed 👍', finished: true };
+      }
+      if (choice.kind === 'noop') {
+        return {
+          text: `Reply with a number from the list above, or <i>skip</i> to drop "${escapeHtml(pending.query)}".`,
+        };
+      }
+      if (choice.kind === 'skip') {
+        state.unmatchedQueries.push(pending.query);
+        state.pendingChoices = state.pendingChoices?.slice(1);
+        trace(state, 'await_line_choice', `skipped ${pending.query}`);
+      } else {
+        const idx = choice.index - 1;
+        const picked = pending.candidates[idx];
+        if (!picked) {
+          return {
+            text: `That number isn't on the list. Pick 1 to ${pending.candidates.length}, or say <i>skip</i>.`,
+          };
+        }
+        state.resolvedProducts = state.resolvedProducts ?? {};
+        state.resolvedProducts[pending.requestIndex] = picked;
+        state.pendingChoices = state.pendingChoices?.slice(1);
+        trace(state, 'await_line_choice', `picked ${picked.name} for "${pending.query}"`);
+      }
+
+      // More to resolve?
+      if ((state.pendingChoices ?? []).length > 0) {
+        await save(userId, state, existingTask);
+        return { text: presentLineChoiceReply(state) };
+      }
+
+      // All resolved — assemble cart + preview.
+      const r = await assemblePreview(userId, state, provider);
       if (!r.ok) {
         state.phase = 'failed';
         await save(userId, state, existingTask);
-        return { text: r.reply ?? 'Could not prepare preview.', finished: true };
+        return { text: r.reply ?? 'Could not price the cart.', finished: true };
+      }
+      if (state.preview && !state.preview.deliverable) {
+        state.phase = 'failed';
+        recordError(state, 'preparing_preview', 'unserviceable', 'preview deliverable=false');
+        await save(userId, state, existingTask);
+        return { text: presentUnserviceableReply(state), finished: true };
       }
       state.phase = 'await_confirm';
       await save(userId, state, existingTask);
