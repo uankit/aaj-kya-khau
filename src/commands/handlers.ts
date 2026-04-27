@@ -28,7 +28,7 @@ import {
   generatePkce,
   generateState,
   ZEPTO_POSTMAN_REDIRECT,
-} from '../services/oauth/zepto.js';
+} from '../providers/grocery/zepto/oauth.js';
 import { encrypt } from '../utils/crypto.js';
 import { env } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';

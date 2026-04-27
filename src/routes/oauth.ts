@@ -33,7 +33,7 @@ import {
   exchangeCodeForTokens,
   generatePkce,
   generateState,
-} from '../services/oauth/zepto.js';
+} from '../providers/grocery/zepto/oauth.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('oauth');

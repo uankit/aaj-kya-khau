@@ -26,12 +26,13 @@
 import { and, desc, eq, gt, inArray } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { agentTasks, type AgentTask } from '../db/schema.js';
-import { type McpToolResult } from '../services/mcp/zepto-client.js';
+import { type McpToolResult } from '../providers/grocery/zepto/client.js';
 import {
   ZeptoSessionNotConnectedError,
   ZeptoWarmUpError,
   callZeptoToolWarm,
-} from '../services/mcp/zepto-session.js';
+  listWarmZeptoTools,
+} from '../providers/grocery/zepto/session.js';
 import { createLogger } from '../utils/logger.js';
 import { escapeHtml } from '../utils/html.js';
 
@@ -86,6 +87,10 @@ export interface ZeptoOrderState {
   phase: Phase;
   query?: string;
   address?: Address;
+  /** Zepto store ID bound to the selected address. Search/cart are gated on
+   * select_store having been called for the current session; this caches
+   * the store ID so we don't re-resolve it per turn. */
+  storeId?: string;
   products?: ProductOption[];
   selected?: ProductOption;
   cartKey?: string;
@@ -257,43 +262,168 @@ function extractStructured<T>(r: McpToolResult): T | null {
 
 // ─────────────────────────────────────────────────────────────────────────
 // Phase: ENSURE_ADDRESS
+//
+// Owns the full shopping-prerequisites chain. Zepto layers preconditions:
+// session warmed → delivery address selected → store selected. We pay them
+// all here, up front, so downstream phases (search / cart / order) can
+// assume a ready-to-shop state. Each precondition is cached in state so
+// the chain short-circuits on subsequent turns.
 // ─────────────────────────────────────────────────────────────────────────
 
 interface SavedAddressListResp {
   addresses?: Array<{ id: string; label?: string; isDefault?: boolean; addressLine?: string }>;
 }
 
-async function ensureAddress(userId: string, state: ZeptoOrderState): Promise<{ ok: boolean; reply?: string }> {
-  if (state.address?.id) return { ok: true };
+interface LocationServiceabilityResp {
+  isServiceable?: boolean;
+  storeId?: string;
+  store?: { id?: string; storeId?: string };
+}
 
-  const listed = await mcp<SavedAddressListResp>(userId, 'list_saved_addresses', {});
-  if (!listed.ok) {
-    recordError(state, 'ensure_address', 'list_failed', listed.error);
-    return { ok: false, reply: `Couldn't load your saved Zepto addresses — ${escapeHtml(listed.error)}` };
+interface SelectStoreResp {
+  storeId?: string;
+  store?: { id?: string; storeId?: string };
+}
+
+async function ensureAddress(userId: string, state: ZeptoOrderState): Promise<{ ok: boolean; reply?: string }> {
+  if (state.address?.id && state.storeId) return { ok: true };
+
+  // Step 1: pick & select a saved address (if not already cached).
+  if (!state.address?.id) {
+    const listed = await mcp<SavedAddressListResp>(userId, 'list_saved_addresses', {});
+    if (!listed.ok) {
+      recordError(state, 'ensure_address', 'list_failed', listed.error);
+      return { ok: false, reply: `Couldn't load your saved Zepto addresses — ${escapeHtml(listed.error)}` };
+    }
+
+    const addresses = listed.structured?.addresses ?? [];
+    if (addresses.length === 0) {
+      recordError(state, 'ensure_address', 'no_address', 'User has no saved addresses');
+      return {
+        ok: false,
+        reply: 'You have no saved delivery address on Zepto. Open the Zepto app and add one, then try again 🙏',
+      };
+    }
+
+    const chosen = addresses.find((a) => a.isDefault) ?? addresses[0]!;
+    const selected = await mcp(userId, 'select_saved_address', { addressId: chosen.id });
+    if (!selected.ok) {
+      recordError(state, 'ensure_address', 'select_failed', selected.error);
+      return { ok: false, reply: `Couldn't select your address on Zepto — ${escapeHtml(selected.error)}` };
+    }
+
+    state.address = {
+      id: chosen.id,
+      label: chosen.label ?? chosen.addressLine ?? 'Your saved Zepto address',
+    };
+    recordTrace(state, 'ensure_address', `selected address ${chosen.id}`);
   }
 
-  const addresses = listed.structured?.addresses ?? [];
-  if (addresses.length === 0) {
-    recordError(state, 'ensure_address', 'no_address', 'User has no saved addresses');
+  // Step 2: select a store for that address.
+  // Zepto gates search / cart / order on select_store having been called
+  // for the current MCP session, even when the selected saved address
+  // already has a known store on their side.
+  const storeResult = await selectStoreForAddress(userId, state.address!.id);
+  if (!storeResult.ok) {
+    recordError(state, 'ensure_address', 'store_select_failed', storeResult.error);
     return {
       ok: false,
-      reply: 'You have no saved delivery address on Zepto. Open the Zepto app and add one, then try again 🙏',
+      reply: `Couldn't set a Zepto store for your delivery address — ${escapeHtml(storeResult.error)}`,
+    };
+  }
+  state.storeId = storeResult.storeId ?? 'unknown';
+  recordTrace(state, 'ensure_address', `selected store ${state.storeId}`);
+  return { ok: true };
+}
+
+/**
+ * Resolve and select the Zepto store that serves the given address.
+ *
+ * Strategy — we don't have the definitive schema of `select_store` or
+ * `get_location_serviceability`, so try the two most plausible shapes and
+ * fall back cleanly. On total failure we dump those tools' schemas so the
+ * next iteration can pass the right args.
+ */
+async function selectStoreForAddress(
+  userId: string,
+  addressId: string,
+): Promise<{ ok: true; storeId?: string } | { ok: false; error: string }> {
+  // Attempt A: some Zepto deployments let select_store derive the store
+  // from the currently-selected address (no arg / { addressId }).
+  const direct = await mcp<SelectStoreResp>(userId, 'select_store', { addressId });
+  if (direct.ok) {
+    const storeId =
+      direct.structured?.storeId ?? direct.structured?.store?.id ?? direct.structured?.store?.storeId;
+    log.info(`select_store direct ok (storeId=${storeId ?? 'unknown'})`, { userId });
+    return { ok: true, storeId };
+  }
+
+  // Attempt B: resolve store ID via location serviceability, then
+  // explicitly select_store({ storeId }).
+  const serv = await mcp<LocationServiceabilityResp>(userId, 'get_location_serviceability', {
+    addressId,
+  });
+  if (!serv.ok) {
+    await dumpStoreToolSchemas(userId, {
+      directError: direct.error,
+      servError: serv.error,
+    });
+    return {
+      ok: false,
+      error: `select_store({addressId}) → ${direct.error}; get_location_serviceability → ${serv.error}`,
     };
   }
 
-  const chosen = addresses.find((a) => a.isDefault) ?? addresses[0]!;
-  const selected = await mcp(userId, 'select_saved_address', { addressId: chosen.id });
-  if (!selected.ok) {
-    recordError(state, 'ensure_address', 'select_failed', selected.error);
-    return { ok: false, reply: `Couldn't select your address on Zepto — ${escapeHtml(selected.error)}` };
+  const storeId =
+    serv.structured?.storeId ?? serv.structured?.store?.id ?? serv.structured?.store?.storeId;
+  if (!storeId) {
+    await dumpStoreToolSchemas(userId, {
+      directError: direct.error,
+      servError: 'no storeId in serviceability response',
+    });
+    return {
+      ok: false,
+      error: `get_location_serviceability returned but no storeId was found in response`,
+    };
   }
 
-  state.address = {
-    id: chosen.id,
-    label: chosen.label ?? chosen.addressLine ?? 'Your saved Zepto address',
-  };
-  recordTrace(state, 'ensure_address', `selected address ${chosen.id}`);
-  return { ok: true };
+  const byId = await mcp<SelectStoreResp>(userId, 'select_store', { storeId });
+  if (!byId.ok) {
+    await dumpStoreToolSchemas(userId, {
+      directError: direct.error,
+      servError: `select_store({storeId}) → ${byId.error}`,
+    });
+    return { ok: false, error: `select_store({storeId=${storeId}}) → ${byId.error}` };
+  }
+
+  log.info(`select_store via serviceability ok (storeId=${storeId})`, { userId });
+  return { ok: true, storeId };
+}
+
+/**
+ * One-shot diagnostic: dump the inputSchema + description of store-related
+ * Zepto tools when our arg-shape guesses fail. Keeps the next fix cycle
+ * evidence-based rather than guessing further.
+ */
+async function dumpStoreToolSchemas(
+  userId: string,
+  context: { directError: string; servError: string },
+): Promise<void> {
+  try {
+    const all = await listWarmZeptoTools(userId);
+    const relevant = all.filter((t) => /store|location|servic|shop|zone/i.test(t.name));
+    log.warn('DEBUG store-related tool schemas (select_store path exhausted)', {
+      userId,
+      context,
+      schemas: relevant.map((t) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: t.inputSchema,
+      })),
+    });
+  } catch (err) {
+    log.warn('DEBUG tools/list for store diagnosis failed', err);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────

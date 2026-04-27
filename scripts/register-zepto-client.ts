@@ -12,7 +12,7 @@
 
 import 'dotenv/config';
 
-import { ZEPTO, ZEPTO_POSTMAN_REDIRECT } from '../src/services/oauth/zepto.js';
+import { ZEPTO, ZEPTO_POSTMAN_REDIRECT } from '../src/providers/grocery/zepto/oauth.js';
 
 // Two modes:
 //   --postman        → register with Postman's OAuth relay as redirect URI

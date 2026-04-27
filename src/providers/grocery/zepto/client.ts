@@ -15,7 +15,7 @@
  * (e.g. expired), we re-initialize and retry once.
  */
 
-import { createLogger } from '../../utils/logger.js';
+import { createLogger } from '../../../utils/logger.js';
 
 const log = createLogger('mcp-zepto');
 

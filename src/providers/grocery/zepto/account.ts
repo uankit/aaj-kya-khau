@@ -7,12 +7,12 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { db } from '../../config/database.js';
-import { env } from '../../config/env.js';
-import { connectedAccounts } from '../../db/schema.js';
-import { decrypt, encrypt } from '../../utils/crypto.js';
-import { ZEPTO, ZEPTO_MCP_RESOURCE } from '../oauth/zepto.js';
-import { createLogger } from '../../utils/logger.js';
+import { db } from '../../../config/database.js';
+import { env } from '../../../config/env.js';
+import { connectedAccounts } from '../../../db/schema.js';
+import { decrypt, encrypt } from '../../../utils/crypto.js';
+import { ZEPTO, ZEPTO_MCP_RESOURCE } from './oauth.js';
+import { createLogger } from '../../../utils/logger.js';
 
 const log = createLogger('zepto-account');
 

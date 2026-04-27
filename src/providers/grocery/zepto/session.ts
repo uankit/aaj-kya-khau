@@ -24,15 +24,17 @@
  */
 
 import { eq } from 'drizzle-orm';
-import { db } from '../../config/database.js';
-import { users } from '../../db/schema.js';
-import { createLogger } from '../../utils/logger.js';
-import { getValidZeptoAccessToken } from './zepto-account.js';
+import { db } from '../../../config/database.js';
+import { users } from '../../../db/schema.js';
+import { createLogger } from '../../../utils/logger.js';
+import { getValidZeptoAccessToken } from './account.js';
 import {
   callZeptoTool,
+  listZeptoTools,
   onZeptoSessionEvicted,
+  type McpTool,
   type McpToolResult,
-} from './zepto-client.js';
+} from './client.js';
 
 const log = createLogger('zepto-session');
 
@@ -80,6 +82,19 @@ export async function callZeptoToolWarm(
 
   const result = await callZeptoTool(token, toolName, args);
   return { token, result };
+}
+
+/**
+ * Inspect Zepto's tool catalog via the warmed session. Used by the workflow
+ * for diagnostic logging when we hit an unknown precondition — dumping the
+ * schema of the tool we got wrong lets us fix it definitively on the next
+ * pass instead of guessing arg shapes.
+ */
+export async function listWarmZeptoTools(userId: string): Promise<McpTool[]> {
+  const token = await getValidZeptoAccessToken(userId);
+  if (!token) throw new ZeptoSessionNotConnectedError();
+  if (!warmedTokens.has(token)) await warmUp(userId, token);
+  return listZeptoTools(token);
 }
 
 // ─────────────────────────────────────────────────────────────────────────
