@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — Aaj Kya Khaun</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍽️%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body class="app-body">
+  <main class="app-shell">
+    <a href="/" class="app-back">← Back</a>
+
+    <section class="card" id="email-card">
+      <div class="emoji-stack">🍽️</div>
+      <h1>Welcome.</h1>
+      <p class="lede">Enter your email and we’ll send you a one-click sign-in link.</p>
+
+      <form id="email-form" class="form">
+        <label class="field">
+          <span class="field-label">Email</span>
+          <input type="email" name="email" placeholder="you@example.com" required autofocus />
+        </label>
+        <button type="submit" class="btn btn-primary">
+          <span class="btn-label">Send me a link</span>
+        </button>
+      </form>
+      <p class="form-error" id="email-error" hidden></p>
+    </section>
+
+    <section class="card" id="sent-card" hidden>
+      <div class="emoji-stack">📬</div>
+      <h1>Check your inbox.</h1>
+      <p class="lede">We sent a one-time sign-in link to <strong id="sent-email"></strong>. It expires in 15 minutes.</p>
+      <p class="hint">Didn’t see it? Look in spam, or <a href="#" id="resend-link">resend</a>.</p>
+    </section>
+  </main>
+
+  <script src="/static/start.js"></script>
+</body>
+</html>

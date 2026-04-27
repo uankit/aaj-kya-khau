@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import formbody from '@fastify/formbody';
+import cookie from '@fastify/cookie';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -11,6 +12,7 @@ import { healthRoutes } from './routes/health.js';
 import { webhookRoutes } from './routes/webhook.js';
 import { whatsappRoutes } from './routes/whatsapp.js';
 import { oauthRoutes } from './routes/oauth.js';
+import { webRoutes } from './web/index.js';
 import { loadAllSchedules } from './services/scheduler.js';
 import { loadAllNightlyCrons } from './services/nightly.js';
 
@@ -59,6 +61,9 @@ async function bootstrap() {
   // Twilio posts application/x-www-form-urlencoded.
   await app.register(formbody);
 
+  // Cookies for web sessions.
+  await app.register(cookie, { secret: env.SESSION_SECRET });
+
   // Serve CSS/JS/images from /public/ under the /static/ URL prefix.
   const publicDir = resolvePublicDir();
   await app.register(fastifyStatic, {
@@ -66,16 +71,25 @@ async function bootstrap() {
     prefix: '/static/',
   });
 
-  // Read landing page HTML once at boot — serve it at /
+  // Read landing/onboarding HTML once at boot — serve at clean URLs.
   const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf-8');
+  const startHtml = fs.readFileSync(path.join(publicDir, 'start.html'), 'utf-8');
+  const appHtml = fs.readFileSync(path.join(publicDir, 'app.html'), 'utf-8');
   app.get('/', async (_req, reply) => {
     return reply.type('text/html; charset=utf-8').send(indexHtml);
+  });
+  app.get('/start', async (_req, reply) => {
+    return reply.type('text/html; charset=utf-8').send(startHtml);
+  });
+  app.get('/app', async (_req, reply) => {
+    return reply.type('text/html; charset=utf-8').send(appHtml);
   });
 
   await app.register(healthRoutes);
   await app.register(webhookRoutes);
   await app.register(whatsappRoutes);
   await app.register(oauthRoutes);
+  await app.register(webRoutes);
 
   // Load all existing crons from the DB so they survive restarts.
   await loadAllSchedules();

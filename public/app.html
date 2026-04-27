@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Set up — Aaj Kya Khaun</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🍽️%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body class="app-body">
+  <main class="app-shell">
+    <header class="app-header">
+      <a href="/" class="logo-mini">🍽️ Aaj Kya Khaun</a>
+      <nav class="step-dots" id="step-dots"></nav>
+    </header>
+
+    <!-- Loading -->
+    <section class="card" id="step-loading">
+      <p class="hint">Loading…</p>
+    </section>
+
+    <!-- Step 1: Profile -->
+    <section class="card" id="step-profile" hidden>
+      <h1>Tell me about you.</h1>
+      <p class="lede">A name and your diet so I don’t suggest paneer to a vegan.</p>
+      <form id="profile-form" class="form">
+        <label class="field">
+          <span class="field-label">Your name</span>
+          <input type="text" name="name" placeholder="Ankit" maxlength="80" required />
+        </label>
+        <fieldset class="field">
+          <legend class="field-label">Diet</legend>
+          <div class="chip-row" role="radiogroup">
+            <label class="chip"><input type="radio" name="dietType" value="veg" /> 🌿 Veg</label>
+            <label class="chip"><input type="radio" name="dietType" value="egg" /> 🥚 Eggetarian</label>
+            <label class="chip"><input type="radio" name="dietType" value="non-veg" /> 🍗 Non-veg</label>
+            <label class="chip"><input type="radio" name="dietType" value="vegan" /> 🌱 Vegan</label>
+          </div>
+        </fieldset>
+        <button type="submit" class="btn btn-primary">Continue</button>
+      </form>
+    </section>
+
+    <!-- Step 2: Schedule -->
+    <section class="card" id="step-schedule" hidden>
+      <h1>When do you eat?</h1>
+      <p class="lede">I’ll nudge you a few minutes before each meal. Skip and I’ll use sensible defaults.</p>
+      <form id="schedule-form" class="form">
+        <div class="time-grid">
+          <label class="time-row">
+            <span class="time-icon">🍳</span>
+            <span class="time-label">Breakfast</span>
+            <input type="time" name="breakfast" value="08:00" />
+          </label>
+          <label class="time-row">
+            <span class="time-icon">🍛</span>
+            <span class="time-label">Lunch</span>
+            <input type="time" name="lunch" value="13:00" />
+          </label>
+          <label class="time-row">
+            <span class="time-icon">🍿</span>
+            <span class="time-label">Snack</span>
+            <input type="time" name="snack" value="17:00" />
+          </label>
+          <label class="time-row">
+            <span class="time-icon">🍲</span>
+            <span class="time-label">Dinner</span>
+            <input type="time" name="dinner" value="20:30" />
+          </label>
+          <label class="time-row time-row-divider">
+            <span class="time-icon">🌙</span>
+            <span class="time-label">Nightly summary</span>
+            <input type="time" name="nightly" value="22:00" />
+          </label>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn btn-ghost" id="schedule-defaults">Use defaults</button>
+          <button type="submit" class="btn btn-primary">Continue</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Step 3: Connect Zepto -->
+    <section class="card" id="step-zepto" hidden>
+      <h1>Connect Zepto.</h1>
+      <p class="lede">I’ll read your last 30 orders to pre-load your kitchen, and use Zepto to restock when something runs out. Read-only until you confirm an order.</p>
+
+      <div class="connector-state" id="zepto-not-connected">
+        <ol class="step-list">
+          <li>Click <strong>Open Zepto auth</strong>. A new tab opens.</li>
+          <li>Log in to Zepto if asked.</li>
+          <li>You’ll land on a Postman page with a long code. Copy it.</li>
+          <li>Paste the code below and hit <strong>Connect</strong>.</li>
+        </ol>
+        <div class="btn-row">
+          <button type="button" class="btn btn-ghost" id="zepto-open">Open Zepto auth ↗</button>
+        </div>
+        <label class="field">
+          <span class="field-label">Auth code</span>
+          <input type="text" id="zepto-code" placeholder="paste the code here" autocomplete="off" />
+        </label>
+        <p class="form-error" id="zepto-error" hidden></p>
+        <button type="button" class="btn btn-primary" id="zepto-connect">Connect Zepto</button>
+        <p class="hint">Why a paste? Zepto hasn’t whitelisted our domain yet — we’re using their dev callback for now. One-click flow lands once we partner with them.</p>
+      </div>
+
+      <div class="connector-state success-state" id="zepto-connected" hidden>
+        <div class="emoji-stack">✅</div>
+        <h2>Zepto is connected.</h2>
+        <p class="lede">I’ll seed your pantry from your past orders right after you finish setup.</p>
+        <button type="button" class="btn btn-primary" id="zepto-continue">Continue</button>
+      </div>
+    </section>
+
+    <!-- Step 4: Pick chat surface -->
+    <section class="card" id="step-surface" hidden>
+      <h1>Where should I message you?</h1>
+      <p class="lede">Pick where you want me to live. You can add the other later from Settings.</p>
+
+      <div class="surface-grid">
+        <button type="button" class="surface-card" data-surface="whatsapp">
+          <span class="surface-icon">💬</span>
+          <span class="surface-name">WhatsApp</span>
+          <span class="surface-hint">For most people</span>
+        </button>
+        <button type="button" class="surface-card" data-surface="telegram">
+          <span class="surface-icon">✈️</span>
+          <span class="surface-name">Telegram</span>
+          <span class="surface-hint">If that’s your thing</span>
+        </button>
+      </div>
+
+      <div class="bind-prompt" id="bind-prompt" hidden>
+        <p class="lede" id="bind-prompt-text"></p>
+        <a class="btn btn-primary" id="bind-link" target="_blank" rel="noreferrer">Open chat ↗</a>
+        <p class="hint">Once you send the first message, you’re in. This page will close itself.</p>
+      </div>
+    </section>
+
+    <!-- Step 5: Done -->
+    <section class="card" id="step-done" hidden>
+      <div class="emoji-stack">🎉</div>
+      <h1>You’re all set.</h1>
+      <p class="lede">Open <span id="done-surface">your chat</span> and say hi. I’m already loading your pantry.</p>
+      <a class="btn btn-primary" id="done-link" target="_blank" rel="noreferrer">Open chat</a>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

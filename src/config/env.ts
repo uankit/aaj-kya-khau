@@ -58,6 +58,18 @@ const envSchema = z.object({
   TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
   // Webhook signature validation — Twilio's auth header check.
   TWILIO_WEBHOOK_VALIDATE: z.coerce.boolean().default(true),
+
+  // Email — Resend HTTP API. If RESEND_API_KEY is unset, magic links log
+  // to the console instead of sending (dev mode).
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().default('Aaj Kya Khaun <onboarding@example.com>'),
+
+  // Web sessions — random base64 string (>= 32 bytes) used to sign cookies.
+  // Generate: openssl rand -base64 48
+  SESSION_SECRET: z
+    .string()
+    .min(32, 'SESSION_SECRET must be at least 32 chars')
+    .default('dev-session-secret-change-me-in-production-please-and-thanks'),
 });
 
 const parsed = envSchema.safeParse(process.env);
