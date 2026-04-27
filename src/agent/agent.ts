@@ -19,7 +19,7 @@ import { generateText, type CoreMessage } from 'ai';
 import { db } from '../config/database.js';
 import { messages } from '../db/schema.js';
 import { model } from '../llm/client.js';
-import { sendHtml } from '../services/telegram.js';
+import { sendHtml } from '../surfaces/telegram/index.js';
 import { parseAndSaveInvoice } from '../domain/orders/invoice.js';
 import { hasZeptoConnected } from '../providers/grocery/zepto/account.js';
 import { loadContext } from './context.js';

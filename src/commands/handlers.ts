@@ -19,7 +19,7 @@ import {
   userSchedules,
   type User,
 } from '../db/schema.js';
-import { sendHtml, type TelegramInlineKeyboard } from '../services/telegram.js';
+import { sendHtml, type TelegramInlineKeyboard } from '../surfaces/telegram/index.js';
 import { unregisterMealCron } from '../services/scheduler.js';
 import { unregisterNightlyCron } from '../services/nightly.js';
 import {

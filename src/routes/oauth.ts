@@ -27,7 +27,7 @@ import {
   users,
 } from '../db/schema.js';
 import { encrypt } from '../utils/crypto.js';
-import { sendHtml } from '../services/telegram.js';
+import { sendHtml } from '../surfaces/telegram/index.js';
 import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,

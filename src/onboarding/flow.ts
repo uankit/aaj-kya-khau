@@ -14,7 +14,7 @@
 import { eq, and, isNull, or, ne } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { users, userSchedules, messages, defaultPantryItems, type User } from '../db/schema.js';
-import { sendHtml, type TelegramInlineKeyboard } from '../services/telegram.js';
+import { sendHtml, type TelegramInlineKeyboard } from '../surfaces/telegram/index.js';
 import { registerMealCron } from '../services/scheduler.js';
 import { registerNightlyCron } from '../services/nightly.js';
 import { addItemsBulk } from '../services/inventory.js';

@@ -20,7 +20,7 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { eq } from 'drizzle-orm';
 import { db } from '../../config/database.js';
 import { invoices, type Invoice } from '../../db/schema.js';
-import { downloadMedia } from '../../services/telegram.js';
+import { downloadMedia } from '../../surfaces/telegram/index.js';
 import { addItemsBulk, type AddItemInput } from '../../services/inventory.js';
 import { model } from '../../llm/client.js';
 import { createLogger } from '../../utils/logger.js';

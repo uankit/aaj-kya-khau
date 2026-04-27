@@ -13,7 +13,7 @@ import { webhookCallback } from 'grammy';
 import { env } from '../config/env.js';
 import { db } from '../config/database.js';
 import { webhookDedup } from '../db/schema.js';
-import { bot, parseIncoming, sendText, type IncomingMessage } from '../services/telegram.js';
+import { bot, parseIncoming, sendText, type IncomingMessage } from '../surfaces/telegram/index.js';
 import { getOrCreateUserByTelegramId } from '../services/user.js';
 import { handleOnboardingMessage, sendCurrentPrompt } from '../onboarding/flow.js';
 import { handleTurn } from '../agent/agent.js';

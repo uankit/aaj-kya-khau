@@ -10,9 +10,9 @@
  */
 
 import { Bot, type Context } from 'grammy';
-import { env } from '../config/env.js';
-import { createLogger } from '../utils/logger.js';
-import { withTimeout, retryWithBackoff } from '../utils/timeout.js';
+import { env } from '../../config/env.js';
+import { createLogger } from '../../utils/logger.js';
+import { withTimeout, retryWithBackoff } from '../../utils/timeout.js';
 
 const log = createLogger('telegram');
 
