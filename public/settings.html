@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en-IN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — Aaj Kya Khaun</title>
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg" />
+  <meta name="theme-color" content="#001858" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <link rel="stylesheet" href="/static/settings.css" />
+</head>
+<body class="app-body">
+  <main class="app-shell">
+    <header class="settings-header">
+      <a href="/chat" class="link-back" aria-label="Back to chat">← Chat</a>
+      <h1 class="settings-h1">Settings</h1>
+    </header>
+
+    <!-- Loading -->
+    <section class="card" id="settings-loading">
+      <p class="hint">Loading…</p>
+    </section>
+
+    <!-- ── Profile ─────────────────────────────────────── -->
+    <section class="card settings-section" id="section-profile" hidden>
+      <h2 class="settings-h2">Profile</h2>
+      <form id="profile-form" class="form">
+        <label class="field">
+          <span class="field-label">Name</span>
+          <input type="text" name="name" id="f-name" maxlength="80" required />
+        </label>
+        <fieldset class="field">
+          <legend class="field-label">Diet</legend>
+          <div class="chip-row" role="radiogroup">
+            <label class="chip"><input type="radio" name="dietType" value="veg" /> 🌿 Veg</label>
+            <label class="chip"><input type="radio" name="dietType" value="egg" /> 🥚 Eggetarian</label>
+            <label class="chip"><input type="radio" name="dietType" value="non-veg" /> 🍗 Non-veg</label>
+            <label class="chip"><input type="radio" name="dietType" value="vegan" /> 🌱 Vegan</label>
+          </div>
+        </fieldset>
+        <label class="field">
+          <span class="field-label">Timezone</span>
+          <input type="text" name="timezone" id="f-timezone" maxlength="40" placeholder="Asia/Kolkata" />
+        </label>
+        <div class="form-row">
+          <button type="submit" class="btn btn-primary">Save profile</button>
+          <span class="form-toast" id="toast-profile" hidden>Saved ✓</span>
+        </div>
+      </form>
+    </section>
+
+    <!-- ── Schedule ────────────────────────────────────── -->
+    <section class="card settings-section" id="section-schedule" hidden>
+      <h2 class="settings-h2">Reminder schedule</h2>
+      <p class="hint">When I should suggest meals. Leave any of them blank to skip that nudge.</p>
+      <form id="schedule-form" class="form">
+        <div class="time-grid">
+          <label class="time-row">
+            <span class="time-icon">🍳</span>
+            <span class="time-label">Breakfast</span>
+            <input type="time" name="breakfast" />
+          </label>
+          <label class="time-row">
+            <span class="time-icon">🍛</span>
+            <span class="time-label">Lunch</span>
+            <input type="time" name="lunch" />
+          </label>
+          <label class="time-row">
+            <span class="time-icon">🍿</span>
+            <span class="time-label">Snack</span>
+            <input type="time" name="snack" />
+          </label>
+          <label class="time-row">
+            <span class="time-icon">🍲</span>
+            <span class="time-label">Dinner</span>
+            <input type="time" name="dinner" />
+          </label>
+          <label class="time-row time-row-divider">
+            <span class="time-icon">🌙</span>
+            <span class="time-label">Nightly summary</span>
+            <input type="time" name="nightly" />
+          </label>
+        </div>
+        <div class="form-row">
+          <button type="submit" class="btn btn-primary">Save schedule</button>
+          <button type="button" class="btn btn-ghost" id="schedule-defaults">Reset to defaults</button>
+          <span class="form-toast" id="toast-schedule" hidden>Saved ✓</span>
+        </div>
+      </form>
+    </section>
+
+    <!-- ── Connections ─────────────────────────────────── -->
+    <section class="card settings-section" id="section-connections" hidden>
+      <h2 class="settings-h2">Connections</h2>
+
+      <div class="connection-row">
+        <div class="connection-icon">🛒</div>
+        <div class="connection-body">
+          <div class="connection-name">Zepto</div>
+          <div class="connection-status" id="zepto-status">Checking…</div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-zepto">…</button>
+      </div>
+
+      <div class="connection-row">
+        <div class="connection-icon">✈️</div>
+        <div class="connection-body">
+          <div class="connection-name">Telegram</div>
+          <div class="connection-status" id="telegram-status">…</div>
+        </div>
+      </div>
+
+      <div class="connection-row">
+        <div class="connection-icon">💬</div>
+        <div class="connection-body">
+          <div class="connection-name">Where I message you</div>
+          <div class="connection-status" id="surface-status">…</div>
+        </div>
+        <select id="surface-select" class="surface-select" aria-label="Preferred surface">
+          <option value="web">Right here (web)</option>
+          <option value="telegram">Telegram</option>
+        </select>
+      </div>
+    </section>
+
+    <!-- ── Account ─────────────────────────────────────── -->
+    <section class="card settings-section danger" id="section-account" hidden>
+      <h2 class="settings-h2">Account</h2>
+      <div class="account-row">
+        <div>
+          <div class="account-label">Logged in as</div>
+          <div class="account-email" id="acct-email"></div>
+        </div>
+        <button type="button" class="btn btn-ghost" id="btn-logout">Log out</button>
+      </div>
+      <div class="account-row danger-row">
+        <div>
+          <div class="account-label">Delete account</div>
+          <div class="hint">Removes your profile, pantry, message history, Zepto link. Permanent.</div>
+        </div>
+        <button type="button" class="btn btn-danger" id="btn-delete-open">Delete account</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Delete confirmation modal -->
+  <div class="modal-backdrop" id="delete-modal" hidden>
+    <div class="modal-card">
+      <h2>Delete account?</h2>
+      <p class="lede">
+        This deletes your profile, pantry, conversation history, Zepto connection, and notification subscriptions. There's no undo.
+      </p>
+      <p class="hint">Type <code>DELETE</code> below to confirm.</p>
+      <input type="text" class="confirm-input" id="delete-confirm" autocomplete="off" placeholder="DELETE" />
+      <div class="form-row">
+        <button type="button" class="btn btn-ghost" id="btn-delete-cancel">Cancel</button>
+        <button type="button" class="btn btn-danger" id="btn-delete-confirm" disabled>Delete forever</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/settings.js"></script>
+</body>
+</html>

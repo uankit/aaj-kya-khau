@@ -1,0 +1,232 @@
+/* =========================================================
+   Settings — extends styles.css + app.css.
+   Reuses .card / .field / .btn / .chip / .time-row tokens.
+   ========================================================= */
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 8px;
+}
+.link-back {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 14px;
+  transition: color 0.15s;
+}
+.link-back:hover { color: var(--ink); }
+
+.settings-h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(28px, 4.5vw, 36px);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.settings-section .form { gap: 18px; }
+.settings-h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 16px;
+}
+
+.settings-section.danger {
+  border-color: rgba(232, 90, 137, 0.2);
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* Inline "Saved ✓" pill */
+.form-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(167, 201, 87, 0.18);
+  color: var(--ink);
+  border: 1px solid rgba(167, 201, 87, 0.4);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  animation: toast-in 0.2s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Connections rows ─────────────────────────────────── */
+.connection-row {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(23, 44, 102, 0.06);
+}
+.connection-row:last-child { border-bottom: 0; }
+.connection-icon {
+  font-size: 22px;
+  display: flex;
+  justify-content: center;
+}
+.connection-name {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 15px;
+}
+.connection-status {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.connection-status.is-connected { color: #2f8a4a; }
+.connection-status.is-disconnected { color: var(--text-muted); }
+
+.btn-sm {
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 10px;
+}
+
+.surface-select {
+  font-family: var(--font-body);
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(23, 44, 102, 0.15);
+  background: var(--cream-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* ── Account section ─────────────────────────────────── */
+.account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(23, 44, 102, 0.06);
+}
+.account-row:last-child { border-bottom: 0; }
+.account-row.danger-row {
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px dashed rgba(232, 90, 137, 0.3);
+  border-bottom: 0;
+  align-items: flex-start;
+}
+.account-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.account-email {
+  color: var(--ink);
+  font-weight: 500;
+  font-size: 15px;
+}
+
+/* ── Buttons ─────────────────────────────────────────── */
+.btn-danger {
+  background: var(--coral-deep);
+  color: var(--white);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.btn-danger:hover { background: #d04976; }
+.btn-danger:disabled {
+  background: rgba(232, 90, 137, 0.4);
+  cursor: not-allowed;
+}
+
+/* ── Delete modal ────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 24, 88, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+  animation: fade-in 0.15s ease-out;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-card {
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  padding: 32px 28px;
+  max-width: 460px;
+  width: 100%;
+  box-shadow: var(--shadow-xl);
+  animation: modal-pop 0.18s ease-out;
+}
+@keyframes modal-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.modal-card h2 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+.modal-card .lede {
+  color: var(--text);
+  font-size: 15px;
+  margin-bottom: 18px;
+}
+.modal-card .hint { margin-bottom: 8px; }
+.modal-card code {
+  background: rgba(23, 44, 102, 0.08);
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.92em;
+  color: var(--ink);
+}
+.confirm-input {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-size: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(232, 90, 137, 0.3);
+  background: var(--cream-2);
+  color: var(--text);
+  margin-bottom: 16px;
+  letter-spacing: 0.06em;
+}
+.confirm-input:focus {
+  outline: none;
+  border-color: var(--coral-deep);
+  box-shadow: 0 0 0 3px rgba(232, 90, 137, 0.18);
+}

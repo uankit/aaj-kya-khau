@@ -70,6 +70,7 @@ async function bootstrap() {
   const startHtml = fs.readFileSync(path.join(publicDir, 'start.html'), 'utf-8');
   const appHtml = fs.readFileSync(path.join(publicDir, 'app.html'), 'utf-8');
   const chatHtml = fs.readFileSync(path.join(publicDir, 'chat.html'), 'utf-8');
+  const settingsHtml = fs.readFileSync(path.join(publicDir, 'settings.html'), 'utf-8');
   app.get('/', async (_req, reply) => {
     return reply.type('text/html; charset=utf-8').send(indexHtml);
   });
@@ -81,6 +82,9 @@ async function bootstrap() {
   });
   app.get('/chat', async (_req, reply) => {
     return reply.type('text/html; charset=utf-8').send(chatHtml);
+  });
+  app.get('/settings', async (_req, reply) => {
+    return reply.type('text/html; charset=utf-8').send(settingsHtml);
   });
 
   // PWA assets at root scope — service workers can only control paths

@@ -6,11 +6,16 @@
 
 import { randomBytes } from 'crypto';
 import type { FastifyInstance } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../config/database.js';
 import { env } from '../config/env.js';
-import { bindTokens, userSchedules, users } from '../db/schema.js';
+import {
+  bindTokens,
+  connectedAccounts,
+  userSchedules,
+  users,
+} from '../db/schema.js';
 import { hasZeptoConnected } from '../providers/grocery/zepto/account.js';
 import { resolveTelegramBotUsername } from '../surfaces/telegram/bot-info.js';
 import { createLogger } from '../utils/logger.js';
@@ -67,6 +72,7 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
       timezone: u.timezone,
       onboardingComplete: u.onboardingComplete,
       telegramConnected: u.telegramId !== null,
+      preferredSurface: u.preferredSurface,
       nightlySummaryAt: u.nightlySummaryAt,
       zeptoConnected,
     });
@@ -152,6 +158,42 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
 
     log.info(`bind token issued for user=${u.id}`);
     return reply.send({ token, deepLink, expiresAt });
+  });
+
+  // DELETE /api/me/zepto — disconnect Zepto. Removes the stored token,
+  // clears the saved default address, and resets pantry-seed status so a
+  // fresh reconnect can re-seed cleanly. Inventory is NOT deleted — the
+  // user still wants their pantry back when they reconnect.
+  app.delete('/api/me/zepto', { preHandler: requireAuth }, async (request, reply) => {
+    const u = request.user!;
+    await db
+      .delete(connectedAccounts)
+      .where(
+        and(eq(connectedAccounts.userId, u.id), eq(connectedAccounts.provider, 'zepto')),
+      );
+    await db
+      .update(users)
+      .set({
+        defaultZeptoAddressId: null,
+        pantrySeedStatus: 'idle',
+        pantrySeedCount: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, u.id));
+    log.info(`zepto disconnected for user=${u.id}`);
+    return reply.send({ ok: true });
+  });
+
+  // DELETE /api/me — hard-delete the account. Foreign-key CASCADE on every
+  // related table (schedules, inventory, messages, surface_bindings,
+  // bind_tokens, web_sessions, web_push_subscriptions, connected_accounts,
+  // agent_tasks, invoices, meal_logs) does the rest in one statement.
+  app.delete('/api/me', { preHandler: requireAuth }, async (request, reply) => {
+    const u = request.user!;
+    await db.delete(users).where(eq(users.id, u.id));
+    log.info(`user=${u.id} deleted account`);
+    reply.clearCookie('akk_session', { path: '/' });
+    return reply.send({ ok: true });
   });
 
   // POST /api/me/onboarding/complete
