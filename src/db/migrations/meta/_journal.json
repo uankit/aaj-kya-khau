@@ -99,6 +99,13 @@
       "when": 1777386029289,
       "tag": "0013_fuzzy_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777386934716,
+      "tag": "0014_natural_black_panther",
+      "breakpoints": true
     }
   ]
 }

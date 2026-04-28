@@ -93,6 +93,13 @@ export const users = pgTable(
      */
     pantrySeedStatus: text('pantry_seed_status').default('idle'),
     pantrySeedCount: integer('pantry_seed_count'),
+    /**
+     * Where the user wants to chat with the agent. 'web' = /chat page on
+     * aajkyakhaun.com, 'telegram' = the bot. Set during onboarding by the
+     * surface picker. Null on legacy rows; treat as 'telegram' when
+     * telegram_id is set, else 'web'.
+     */
+    preferredSurface: text('preferred_surface'),
     // Health profile (nullable — collected via agent, not onboarding)
     age: integer('age'),
     gender: genderEnum('gender'),

@@ -335,35 +335,42 @@ function sleep(ms: number): Promise<void> {
  * history will have a one-turn gap which is much better than a double text.
  */
 async function sendAndPersist(userId: string, text: string): Promise<void> {
-  const telegramId = await resolveTelegramId(userId);
-  if (!telegramId) {
-    log.warn(`Cannot send — user ${userId} has not bound Telegram yet`);
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { telegramId: true, preferredSurface: true },
+  });
+  if (!user) return;
+
+  const surface =
+    user.preferredSurface ?? (user.telegramId ? 'telegram' : 'web');
+
+  if (surface === 'telegram') {
+    if (!user.telegramId) {
+      log.warn(`user=${userId} prefers telegram but no telegram_id; skipping send`);
+      return;
+    }
+    try {
+      await sendHtml(user.telegramId, text);
+    } catch (err) {
+      log.error(`telegram send failed for user=${userId}`, err);
+      return; // don't persist if the send failed — user got nothing
+    }
+    try {
+      await db.insert(messages).values({ userId, role: 'assistant', content: text });
+    } catch (persistErr) {
+      log.error(
+        `telegram sent to user=${userId} but DB persist failed — history will have a gap`,
+        persistErr,
+      );
+    }
     return;
   }
 
-  try {
-    await sendHtml(telegramId, text);
-  } catch (err) {
-    log.error(`outbound send failed for user=${userId}`, err);
-    return; // don't persist if the user never got the message
-  }
-
+  // surface === 'web' — DB is the user-visible surface.
   try {
     await db.insert(messages).values({ userId, role: 'assistant', content: text });
-  } catch (persistErr) {
-    log.error(
-      `Message sent to user=${userId} but DB persist failed — history will have a gap`,
-      persistErr,
-    );
-    // Deliberately do NOT rethrow: user already got their reply.
+  } catch (err) {
+    log.error(`web persist failed for user=${userId}`, err);
   }
-}
-
-async function resolveTelegramId(userId: string): Promise<string | null> {
-  const user = await db.query.users.findFirst({
-    where: eq(users.id, userId),
-    columns: { telegramId: true },
-  });
-  return user?.telegramId ?? null;
 }
 

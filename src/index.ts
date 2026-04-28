@@ -65,10 +65,11 @@ async function bootstrap() {
     prefix: '/static/',
   });
 
-  // Read landing/onboarding HTML once at boot — serve at clean URLs.
+  // Read landing/onboarding/chat HTML once at boot — serve at clean URLs.
   const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf-8');
   const startHtml = fs.readFileSync(path.join(publicDir, 'start.html'), 'utf-8');
   const appHtml = fs.readFileSync(path.join(publicDir, 'app.html'), 'utf-8');
+  const chatHtml = fs.readFileSync(path.join(publicDir, 'chat.html'), 'utf-8');
   app.get('/', async (_req, reply) => {
     return reply.type('text/html; charset=utf-8').send(indexHtml);
   });
@@ -77,6 +78,9 @@ async function bootstrap() {
   });
   app.get('/app', async (_req, reply) => {
     return reply.type('text/html; charset=utf-8').send(appHtml);
+  });
+  app.get('/chat', async (_req, reply) => {
+    return reply.type('text/html; charset=utf-8').send(chatHtml);
   });
 
   await app.register(healthRoutes);
