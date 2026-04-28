@@ -193,6 +193,13 @@
     bindLinkEl.href = deepLink;
     document.getElementById('done-link').href = deepLink;
     document.getElementById('done-surface').textContent = 'Telegram';
+    const firstName = (me?.name ?? '').trim().split(/\s+/)[0];
+    const titleEl = document.getElementById('done-title');
+    if (titleEl) {
+      titleEl.textContent = firstName
+        ? `You're all set, ${firstName}.`
+        : "You're all set.";
+    }
   }
   bindLinkEl.addEventListener('click', async () => {
     // The user is leaving for Telegram. Mark onboarding complete optimistically;

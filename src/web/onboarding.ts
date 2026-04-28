@@ -12,6 +12,7 @@ import { db } from '../config/database.js';
 import { env } from '../config/env.js';
 import { bindTokens, userSchedules, users } from '../db/schema.js';
 import { hasZeptoConnected } from '../providers/grocery/zepto/account.js';
+import { resolveTelegramBotUsername } from '../surfaces/telegram/bot-info.js';
 import { createLogger } from '../utils/logger.js';
 import { loadUser, requireAuth } from './auth-middleware.js';
 
@@ -149,17 +150,3 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-let cachedBotUsername: string | null = null;
-async function resolveTelegramBotUsername(): Promise<string | null> {
-  if (cachedBotUsername) return cachedBotUsername;
-  if (!env.TELEGRAM_BOT_TOKEN) return null;
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`);
-    const json = (await res.json()) as { ok?: boolean; result?: { username?: string } };
-    cachedBotUsername = json.result?.username ?? null;
-    return cachedBotUsername;
-  } catch (err) {
-    log.warn('resolveTelegramBotUsername failed', err);
-    return null;
-  }
-}

@@ -17,6 +17,8 @@ import { bot, parseIncoming, sendHtml, sendText, type IncomingMessage } from '..
 import { consumeBindToken, extractTelegramBindToken } from '../domain/identity/bind.js';
 import { findUserByTelegramId } from '../services/user.js';
 import { handleTurn } from '../agent/agent.js';
+import { getTelegramBotUrl } from '../surfaces/telegram/bot-info.js';
+import { sendWelcomeEmail } from '../web/emails/welcome.js';
 import { tryHandleCommand } from '../commands/handlers.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -186,6 +188,19 @@ async function processMessage(incoming: IncomingMessage): Promise<void> {
         ? `Hi ${escapeUserName(result.user.name)} 👋 You're all set on Telegram. What can I do?`
         : `Welcome back. Telegram is still bound to your account.`;
       await sendHtml(incoming.telegramId, greeting);
+
+      // Fire-and-forget welcome email on first-time bind. Errors are
+      // logged; the user already got the in-chat greeting so we don't
+      // block their turn on email delivery.
+      if (result.fresh && result.user.email) {
+        getTelegramBotUrl()
+          .then((url) =>
+            sendWelcomeEmail(result.user, {
+              openChatUrl: url ?? 'https://aajkyakhaun.com',
+            }),
+          )
+          .catch((err) => log.warn('welcome email failed', err));
+      }
       return;
     }
     // Token failed — fall through to plain /start handling so users with a
