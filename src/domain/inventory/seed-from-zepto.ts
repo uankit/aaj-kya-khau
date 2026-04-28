@@ -15,6 +15,9 @@
  * so re-running is safe but won't refresh quantities downward.
  */
 
+import { eq } from 'drizzle-orm';
+import { db } from '../../config/database.js';
+import { users } from '../../db/schema.js';
 import { addItemsBulk, type AddItemInput } from '../../services/inventory.js';
 import {
   getGroceryProvider,
@@ -31,52 +34,74 @@ export interface SeedResult {
 }
 
 export async function seedPantryFromZepto(userId: string): Promise<SeedResult> {
+  await setSeedStatus(userId, 'running');
+
   let provider;
   try {
     provider = await getGroceryProvider(userId);
   } catch (err) {
     if (err instanceof GroceryProviderNotConnectedError) {
       log.info('seed skipped: zepto not connected', { userId });
+      await setSeedStatus(userId, 'idle');
       return { attemptedCount: 0, insertedCount: 0, skippedCount: 0 };
     }
+    await setSeedStatus(userId, 'failed');
     throw err;
   }
 
-  const items = await provider.pastOrderItems(userId);
-  log.info(`seed candidates from zepto`, { userId, count: items.length });
+  try {
+    const items = await provider.pastOrderItems(userId);
+    log.info(`seed candidates from zepto`, { userId, count: items.length });
 
-  const inputs: AddItemInput[] = [];
-  let skipped = 0;
-  for (const it of items) {
-    if (it.frequency < 2) {
-      skipped++;
-      continue;
+    const inputs: AddItemInput[] = [];
+    let skipped = 0;
+    for (const it of items) {
+      if (it.frequency < 2) {
+        skipped++;
+        continue;
+      }
+      inputs.push({
+        userId,
+        normalizedName: normalizeProductName(it.name).slice(0, 100),
+        rawName: it.name.slice(0, 255),
+        quantity: it.frequency >= 5 ? '1 unit' : '~0.5 unit',
+        source: 'manual',
+        confidence: it.frequency >= 5 ? 'high' : 'medium',
+      });
     }
-    inputs.push({
-      userId,
-      // normalized_name is varchar(100); some Zepto product titles
-      // ("Noise Buds Trance TWS Earbuds...") normalize past that even
-      // after brand-stripping. Hard cap to be safe.
-      normalizedName: normalizeProductName(it.name).slice(0, 100),
-      rawName: it.name.slice(0, 255),
-      // Quantity is a free-form string in inventory_items. Keep it semantic.
-      quantity: it.frequency >= 5 ? '1 unit' : '~0.5 unit',
-      source: 'manual',
-      confidence: it.frequency >= 5 ? 'high' : 'medium',
-    });
-  }
 
-  if (inputs.length === 0) {
-    return { attemptedCount: items.length, insertedCount: 0, skippedCount: skipped };
-  }
+    if (inputs.length === 0) {
+      await setSeedStatus(userId, 'done', 0);
+      return { attemptedCount: items.length, insertedCount: 0, skippedCount: skipped };
+    }
 
-  const inserted = await addItemsBulk(inputs);
-  log.info(`seed complete`, { userId, inserted: inserted.length, skipped });
-  return {
-    attemptedCount: items.length,
-    insertedCount: inserted.length,
-    skippedCount: skipped,
-  };
+    const inserted = await addItemsBulk(inputs);
+    log.info(`seed complete`, { userId, inserted: inserted.length, skipped });
+    await setSeedStatus(userId, 'done', inserted.length);
+    return {
+      attemptedCount: items.length,
+      insertedCount: inserted.length,
+      skippedCount: skipped,
+    };
+  } catch (err) {
+    await setSeedStatus(userId, 'failed');
+    throw err;
+  }
+}
+
+async function setSeedStatus(
+  userId: string,
+  status: 'idle' | 'running' | 'done' | 'failed',
+  count?: number,
+): Promise<void> {
+  await db
+    .update(users)
+    .set({
+      pantrySeedStatus: status,
+      pantrySeedCount: count ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
 }
 
 /**

@@ -157,8 +157,22 @@ export class GroceryProviderNotConnectedError extends GroceryProviderError {
 // The interface
 // ─────────────────────────────────────────────────────────────────────────
 
+export interface ProviderProfile {
+  /** Display name as the provider knows them. */
+  name: string;
+  /** True if the user has completed account-level registration on the provider. */
+  registered: boolean;
+  /** True if the provider considers the account active and shoppable. */
+  active: boolean;
+}
+
 export interface GroceryProvider {
   readonly name: ProviderName;
+
+  // Connection sanity check — verify the stored token can read the user's
+  // own profile. Used right after OAuth to surface a real "Connected as X"
+  // confirmation instead of a blind 200.
+  getProfile(userId: string): Promise<ProviderProfile>;
 
   // Search
   searchMany(userId: string, queries: string[]): Promise<SearchGroup[]>;

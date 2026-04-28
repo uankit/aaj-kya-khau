@@ -27,6 +27,7 @@ import { db } from '../config/database.js';
 import { env } from '../config/env.js';
 import { connectedAccounts, oauthPendingStates } from '../db/schema.js';
 import { seedPantryFromZepto } from '../domain/inventory/seed-from-zepto.js';
+import { zeptoProvider } from '../providers/grocery/zepto/provider.js';
 import { encrypt } from '../utils/crypto.js';
 import {
   ZEPTO_POSTMAN_REDIRECT,
@@ -146,7 +147,21 @@ export async function zeptoOAuthRoutes(app: FastifyInstance): Promise<void> {
 
     await db.delete(oauthPendingStates).where(eq(oauthPendingStates.userId, u.id));
 
-    log.info(`zepto connected for user=${u.id}`);
+    // Verify the token actually works by reading the user's profile.
+    // If it doesn't, the paste was stale / mismatched — clear the row we
+    // just saved so the user can retry without a half-broken state.
+    let profile;
+    try {
+      profile = await zeptoProvider.getProfile(u.id);
+    } catch (err) {
+      log.warn(`zepto profile verify failed for user=${u.id}`, err);
+      await db
+        .delete(connectedAccounts)
+        .where(and(eq(connectedAccounts.userId, u.id), eq(connectedAccounts.provider, 'zepto')));
+      return reply.code(400).send({ error: 'verify_failed' });
+    }
+
+    log.info(`zepto connected for user=${u.id} as "${profile.name}"`);
 
     // Fire-and-forget pantry seed. The user shouldn't wait on a 30-order
     // fetch + N inserts before the UI moves on; we 200 immediately and let
@@ -155,6 +170,9 @@ export async function zeptoOAuthRoutes(app: FastifyInstance): Promise<void> {
       log.warn(`pantry seed failed for user=${u.id}`, err);
     });
 
-    return reply.send({ connected: true });
+    return reply.send({
+      connected: true,
+      profile: { name: profile.name, registered: profile.registered },
+    });
   });
 }

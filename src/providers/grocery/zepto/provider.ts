@@ -138,6 +138,18 @@ const deviceIdFor = (userId: string): string => `${CART_DEVICE_ID_PREFIX}${userI
 export const zeptoProvider: GroceryProvider = {
   name: 'zepto',
 
+  async getProfile(userId) {
+    // get_user_details is text-only; parse the same fields the warm-up does.
+    const result = await call(userId, 'get_user_details', {});
+    const text = flattenText(result);
+    const nameMatch = text.match(/Name:\s*(.+?)\s*$/m);
+    const name = nameMatch?.[1]?.trim() ?? '';
+    const registered = /Registered:\s*Yes/i.test(text);
+    const active = /Active:\s*Yes/i.test(text);
+    if (!name) parseFailure('get_user_details', result);
+    return { name, registered, active };
+  },
+
   async searchMany(userId, queries) {
     if (queries.length === 0) return [];
     const result = await call(userId, 'search_multiple_products', { queries });

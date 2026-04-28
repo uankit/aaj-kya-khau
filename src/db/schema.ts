@@ -85,6 +85,14 @@ export const users = pgTable(
      * mid-conversation override or (eventually) a /settings page.
      */
     defaultZeptoAddressId: text('default_zepto_address_id'),
+    /**
+     * Pantry-seed lifecycle. 'idle' before Zepto is connected, 'running'
+     * while we fetch + insert items, 'done' on success (count populated),
+     * 'failed' on error. The /app page polls /api/me/seed/status to surface
+     * progress to the user.
+     */
+    pantrySeedStatus: text('pantry_seed_status').default('idle'),
+    pantrySeedCount: integer('pantry_seed_count'),
     // Health profile (nullable — collected via agent, not onboarding)
     age: integer('age'),
     gender: genderEnum('gender'),

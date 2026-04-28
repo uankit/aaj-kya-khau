@@ -152,11 +152,24 @@
     zeptoConnectBtn.textContent = 'Connect Zepto';
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      zeptoErr.textContent = data.error === 'no_pending_oauth_or_expired'
-        ? 'That auth window expired. Click "Open Zepto auth" again.'
-        : 'Code rejected. Make sure you copied the whole code.';
+      const map = {
+        no_pending_oauth_or_expired: 'That auth window expired. Click "Open Zepto auth" again.',
+        exchange_failed: 'Code rejected. Make sure you copied the whole code.',
+        verify_failed:
+          "Code accepted but Zepto didn't recognise the session. Try the auth flow again.",
+        zepto_not_configured: 'Zepto OAuth client is not configured on the server.',
+      };
+      zeptoErr.textContent = map[data.error] ?? 'Could not connect Zepto. Try again.';
       zeptoErr.hidden = false;
       return;
+    }
+    const data = await res.json().catch(() => ({}));
+    const name = data.profile?.name?.trim();
+    const titleEl = document.getElementById('zepto-connected-title');
+    if (titleEl) {
+      titleEl.textContent = name
+        ? `Connected as ${name}.`
+        : 'Zepto is connected.';
     }
     me.zeptoConnected = true;
     zeptoNotConnected.hidden = true;
