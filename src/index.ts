@@ -83,6 +83,23 @@ async function bootstrap() {
     return reply.type('text/html; charset=utf-8').send(chatHtml);
   });
 
+  // PWA assets at root scope — service workers can only control paths
+  // up the tree from where they're served. Keeping sw.js at /sw.js gives
+  // it scope over the whole site; serving from /static/ would scope it to
+  // /static/* only and miss /chat.
+  const swJs = fs.readFileSync(path.join(publicDir, 'sw.js'), 'utf-8');
+  const manifestJson = fs.readFileSync(path.join(publicDir, 'manifest.json'), 'utf-8');
+  app.get('/sw.js', async (_req, reply) => {
+    return reply
+      .type('application/javascript; charset=utf-8')
+      .header('Service-Worker-Allowed', '/')
+      .header('Cache-Control', 'no-cache')
+      .send(swJs);
+  });
+  app.get('/manifest.json', async (_req, reply) => {
+    return reply.type('application/manifest+json').send(manifestJson);
+  });
+
   await app.register(healthRoutes);
   await app.register(webhookRoutes);
   await app.register(webRoutes);

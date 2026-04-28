@@ -263,6 +263,20 @@
   });
 
   // ─────────────────────────────────────────────────────────────
+  // Service worker — registered once on first chat load. Scope is /
+  // because sw.js is served from the root by the Fastify route.
+  // The push subscription itself happens in a later phase, gated on
+  // user permission.
+  // ─────────────────────────────────────────────────────────────
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker
+      .register('/sw.js', { scope: '/' })
+      // eslint-disable-next-line no-console
+      .catch((err) => console.warn('sw register failed', err));
+  }
+
+  // ─────────────────────────────────────────────────────────────
   // Boot.
   // ─────────────────────────────────────────────────────────────
   (async () => {
@@ -270,6 +284,7 @@
       await loadMe();
       await loadHistory();
       inputEl.focus();
+      registerServiceWorker();
     } catch (err) {
       // 401 handler in api() already redirected; otherwise log.
       // eslint-disable-next-line no-console
