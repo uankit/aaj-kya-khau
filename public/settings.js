@@ -172,12 +172,6 @@
       tStatus.classList.add('is-disconnected');
     }
 
-    const select = document.getElementById('surface-select');
-    select.value = me.preferredSurface ?? (me.telegramConnected ? 'telegram' : 'web');
-    document.getElementById('surface-status').textContent =
-      select.value === 'telegram'
-        ? 'Nudges go to your Telegram'
-        : 'Nudges go to web push notifications';
   }
 
   document.getElementById('btn-zepto').addEventListener('click', async () => {
@@ -191,20 +185,6 @@
       // Send them back to /app to redo the OAuth paste flow.
       window.location.href = '/app';
     }
-  });
-
-  document.getElementById('surface-select').addEventListener('change', async (e) => {
-    const surface = e.target.value;
-    const res = await api('/api/me/surface', {
-      method: 'PATCH',
-      body: JSON.stringify({ surface }),
-    });
-    if (!res.ok) return alert('Could not save preference.');
-    me.preferredSurface = surface;
-    document.getElementById('surface-status').textContent =
-      surface === 'telegram'
-        ? 'Nudges go to your Telegram'
-        : 'Nudges go to web push notifications';
   });
 
   // ─────────────────────────────────────────────────────────────

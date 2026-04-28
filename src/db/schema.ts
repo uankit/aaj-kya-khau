@@ -93,13 +93,6 @@ export const users = pgTable(
      */
     pantrySeedStatus: text('pantry_seed_status').default('idle'),
     pantrySeedCount: integer('pantry_seed_count'),
-    /**
-     * Where the user wants to chat with the agent. 'web' = /chat page on
-     * aajkyakhaun.com, 'telegram' = the bot. Set during onboarding by the
-     * surface picker. Null on legacy rows; treat as 'telegram' when
-     * telegram_id is set, else 'web'.
-     */
-    preferredSurface: text('preferred_surface'),
     // Health profile (nullable — collected via agent, not onboarding)
     age: integer('age'),
     gender: genderEnum('gender'),
@@ -156,33 +149,6 @@ export const bindTokens = pgTable(
   (table) => ({
     userIdx: index('bind_tokens_user_idx').on(table.userId),
     expiresIdx: index('bind_tokens_expires_idx').on(table.expiresAt),
-  }),
-);
-
-/* ------------------------------------------------------------------ */
-/* web_push_subscriptions — per-device PushManager subscriptions for  */
-/* users on preferred_surface='web'. One row per browser/device, keyed */
-/* by endpoint (the URL the push service routes through).             */
-/* ------------------------------------------------------------------ */
-
-export const webPushSubscriptions = pgTable(
-  'web_push_subscriptions',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    /** Push service URL — globally unique. */
-    endpoint: text('endpoint').notNull(),
-    p256dh: text('p256dh').notNull(),
-    auth: text('auth').notNull(),
-    userAgent: varchar('user_agent', { length: 200 }),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    userIdx: index('web_push_subs_user_idx').on(table.userId),
-    endpointUnique: uniqueIndex('web_push_subs_endpoint_unique').on(table.endpoint),
   }),
 );
 
@@ -591,5 +557,3 @@ export type BindToken = typeof bindTokens.$inferSelect;
 export type NewBindToken = typeof bindTokens.$inferInsert;
 export type MagicLinkToken = typeof magicLinkTokens.$inferSelect;
 export type WebSession = typeof webSessions.$inferSelect;
-export type WebPushSubscription = typeof webPushSubscriptions.$inferSelect;
-export type NewWebPushSubscription = typeof webPushSubscriptions.$inferInsert;

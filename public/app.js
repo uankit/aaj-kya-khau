@@ -14,16 +14,43 @@
   const dotsEl = document.getElementById('step-dots');
 
   let me = null;
+  let currentStep = null;
 
-  function show(step) {
-    loadingEl.hidden = true;
-    STEPS.forEach((s) => (stepEls[s].hidden = s !== step));
+  function notify(msg, type = 'info') {
+    const container = document.getElementById('notifications');
+    if (!container) return;
+    const n = document.createElement('div');
+    n.className = `notification is-${type}`;
+    n.textContent = msg;
+    container.appendChild(n);
+    setTimeout(() => {
+      n.classList.add('is-leaving');
+      setTimeout(() => n.remove(), 400);
+    }, 4000);
+  }
+
+  async function show(step) {
+    if (currentStep === step) return;
+    
+    const prevEl = currentStep ? stepEls[currentStep] : loadingEl;
+    const nextEl = stepEls[step];
+
+    if (prevEl) {
+      prevEl.classList.add('is-leaving');
+      await new Promise(r => setTimeout(r, 400));
+      prevEl.hidden = true;
+      prevEl.classList.remove('is-leaving');
+    }
+
+    currentStep = step;
+    nextEl.hidden = false;
     renderDots(step);
     if (step === 'surface') void loadSurfaceStep();
   }
 
   function renderDots(active) {
     const idx = STEPS.indexOf(active);
+    if (!dotsEl) return;
     dotsEl.innerHTML = '';
     STEPS.forEach((_, i) => {
       const d = document.createElement('span');
@@ -74,12 +101,8 @@
 
   function decideStep() {
     if (!me.name) return show('profile');
-    // Skip schedule if already set; for v1, treat presence of nightlySummaryAt
-    // (always set) as not a signal — instead, schedule is one-shot, never blocking.
-    // We always show it once until onboardingComplete is true.
-    if (!me.zeptoConnected) return show('zepto');
+    if (!me.zeptoConnected) return show('schedule');
     if (!me.telegramConnected) return show('surface');
-    if (!me.onboardingComplete) return show('done');
     return show('done');
   }
 
@@ -96,8 +119,9 @@
     btn.disabled = true;
     const res = await api('/api/me/profile', { method: 'PATCH', body: JSON.stringify(body) });
     btn.disabled = false;
-    if (!res.ok) return alert('Could not save your profile. Try again.');
+    if (!res.ok) return notify('Could not save your profile. Try again.', 'error');
     me = { ...me, ...body };
+    notify('Profile saved!', 'success');
     show('schedule');
   });
 
@@ -117,7 +141,8 @@
           nightlySummaryAt: String(fd.get('nightly') || '22:00'),
         };
     const res = await api('/api/me/schedule', { method: 'PATCH', body: JSON.stringify(body) });
-    if (!res.ok) return alert('Could not save schedule. Try again.');
+    if (!res.ok) return notify('Could not save schedule. Try again.', 'error');
+    notify('Schedule saved!', 'success');
     show('zepto');
   }
   document.getElementById('schedule-form').addEventListener('submit', (e) => {
@@ -214,63 +239,23 @@
 
   document.getElementById('zepto-continue').addEventListener('click', () => show('surface'));
 
-  // ── Surface picker ─────────────────────────────────────
-  const bindPromptEl = document.getElementById('bind-prompt');
+  // ── Surface (Telegram only) ────────────────────────────
   const bindLinkEl = document.getElementById('bind-link');
-  const surfaceCards = document.querySelectorAll('.surface-card');
+  let surfaceLoaded = false;
 
-  function loadSurfaceStep() {
-    // Reset any prior state when re-entering this step.
-    bindPromptEl.hidden = true;
-    surfaceCards.forEach((c) => c.classList.remove('is-selected'));
-  }
-
-  async function pickSurface(surface) {
-    surfaceCards.forEach((c) => (c.disabled = true));
-    const target = [...surfaceCards].find((c) => c.dataset.surface === surface);
-    target?.classList.add('is-selected');
-
-    const res = await api('/api/me/surface', {
-      method: 'PATCH',
-      body: JSON.stringify({ surface }),
-    });
+  async function loadSurfaceStep() {
+    if (surfaceLoaded) return;
+    surfaceLoaded = true;
+    const res = await api('/api/me/bind/start', { method: 'POST' });
     if (!res.ok) {
-      alert('Could not save your choice. Try again.');
-      surfaceCards.forEach((c) => (c.disabled = false));
+      notify('Could not generate the Telegram link. Refresh and try again.', 'error');
+      surfaceLoaded = false;
       return;
     }
-
-    if (surface === 'web') {
-      // No Telegram bind needed. Mark onboarding complete and head to /chat.
-      await api('/api/me/onboarding/complete', { method: 'POST' });
-      const firstName = (me?.name ?? '').trim().split(/\s+/)[0];
-      const titleEl = document.getElementById('done-title');
-      const linkEl = document.getElementById('done-link');
-      const surfaceEl = document.getElementById('done-surface');
-      if (titleEl) {
-        titleEl.textContent = firstName ? `You're all set, ${firstName}.` : "You're all set.";
-      }
-      if (linkEl) {
-        linkEl.href = '/chat';
-        linkEl.removeAttribute('target');
-        linkEl.textContent = 'Open chat →';
-      }
-      if (surfaceEl) surfaceEl.textContent = 'the chat';
-      show('done');
-      return;
-    }
-
-    // surface === 'telegram' → mint bind token, surface deep link.
-    const bindRes = await api('/api/me/bind/start', { method: 'POST' });
-    if (!bindRes.ok) {
-      alert('Could not generate the Telegram link. Try again.');
-      surfaceCards.forEach((c) => (c.disabled = false));
-      return;
-    }
-    const { deepLink } = await bindRes.json();
+    const { deepLink } = await res.json();
     bindLinkEl.href = deepLink;
-    bindPromptEl.hidden = false;
 
+    // Pre-populate the done card so it's ready before the user lands on it.
     const firstName = (me?.name ?? '').trim().split(/\s+/)[0];
     const titleEl = document.getElementById('done-title');
     const linkEl = document.getElementById('done-link');
@@ -286,13 +271,8 @@
     if (surfaceEl) surfaceEl.textContent = 'Telegram';
   }
 
-  surfaceCards.forEach((card) => {
-    card.addEventListener('click', () => pickSurface(card.dataset.surface));
-  });
-
-  // When the user clicks the Telegram deep-link, mark onboarding complete
-  // optimistically and advance the UI; the actual verify happens server-side
-  // when they send /start <token>.
+  // Tapping the Telegram link marks onboarding complete optimistically —
+  // the server-side verify happens when the user sends /start <token>.
   bindLinkEl.addEventListener('click', async () => {
     await api('/api/me/onboarding/complete', { method: 'POST' });
     setTimeout(() => show('done'), 1200);

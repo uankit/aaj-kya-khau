@@ -25,6 +25,55 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+  position: relative;
+  z-index: 10;
+}
+
+/* ── Background Decoration (from styles.css) ─────────────── */
+.bg-deco {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+  animation: float-blob 20s ease-in-out infinite;
+}
+.blob-1 {
+  width: 500px; height: 500px;
+  top: -200px; left: -100px;
+  background: radial-gradient(circle, var(--peach), var(--coral) 60%, transparent 70%);
+}
+.blob-2 {
+  width: 450px; height: 450px;
+  bottom: -100px; right: -100px;
+  background: radial-gradient(circle, var(--saffron-soft), var(--coral) 60%, transparent 70%);
+  animation-delay: -5s;
+}
+.blob-3 {
+  width: 400px; height: 400px;
+  top: 40%; left: 10%;
+  background: radial-gradient(circle, var(--pistachio), transparent 70%);
+  opacity: 0.2;
+  animation-delay: -10s;
+}
+@keyframes float-blob {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%      { transform: translate(30px, -20px) scale(1.02); }
+  66%      { transform: translate(-20px, 30px) scale(0.98); }
+}
+.grain {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.09 0 0 0 0 0.17 0 0 0 0 0.4 0 0 0 0.4 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  opacity: 0.08;
+  mix-blend-mode: multiply;
+  z-index: 2;
 }
 
 .app-back {
@@ -69,11 +118,29 @@
 
 /* ── Card ─────────────────────────────────────────────────── */
 .card {
-  background: var(--white);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: var(--radius-lg);
   padding: 36px 32px;
-  box-shadow: var(--shadow);
-  border: 1px solid rgba(23, 44, 102, 0.04);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card:not([hidden]) {
+  animation: card-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.card.is-leaving {
+  opacity: 0;
+  transform: translateY(-20px) scale(0.98);
+  pointer-events: none;
 }
 
 .card h1 {
@@ -112,6 +179,31 @@
   margin-bottom: 12px;
   display: inline-block;
   filter: drop-shadow(0 4px 12px rgba(245, 130, 174, 0.35));
+  animation: emoji-float 3s ease-in-out infinite;
+}
+
+@keyframes emoji-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+/* ── Loader ──────────────────────────────────────────────── */
+.loader-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 0;
+  gap: 20px;
+}
+.loader-plate {
+  font-size: 48px;
+  animation: plate-spin 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes plate-spin {
+  0%   { transform: rotate(0) scale(1); }
+  50%  { transform: rotate(180deg) scale(1.1); }
+  100% { transform: rotate(360deg) scale(1); }
 }
 
 /* ── Forms ────────────────────────────────────────────────── */
@@ -142,17 +234,21 @@
 .field input[type="time"] {
   font-family: var(--font-body);
   font-size: 16px;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(23, 44, 102, 0.12);
-  background: var(--cream-2);
+  border: 1px solid rgba(23, 44, 102, 0.08);
+  background: rgba(255, 255, 254, 0.6);
   color: var(--text);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: inset 0 2px 4px rgba(23, 44, 102, 0.02);
 }
 .field input:focus {
   outline: none;
-  border-color: var(--coral);
-  box-shadow: 0 0 0 3px rgba(245, 130, 174, 0.18);
+  border-color: var(--navy-soft);
+  background: var(--white);
+  box-shadow: 
+    0 0 0 4px rgba(23, 44, 102, 0.06),
+    inset 0 2px 4px rgba(23, 44, 102, 0.02);
 }
 
 .form-error {
@@ -160,6 +256,35 @@
   font-size: 14px;
   font-weight: 500;
 }
+
+/* ── Notifications ────────────────────────────────────────── */
+.notifications {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 1000;
+  max-width: 320px;
+}
+.notification {
+  background: var(--white);
+  color: var(--ink);
+  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  border-left: 4px solid var(--coral);
+  font-size: 14px;
+  font-weight: 500;
+  animation: notify-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes notify-in {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.notification.is-error { border-left-color: var(--coral-deep); }
+.notification.is-success { border-left-color: var(--pistachio); }
 
 /* ── Buttons ──────────────────────────────────────────────── */
 .btn {
@@ -243,27 +368,40 @@
 
 /* ── Chips (radio group) ──────────────────────────────────── */
 .chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 .chip {
-  padding: 10px 16px;
-  border-radius: 999px;
-  border: 1px solid rgba(23, 44, 102, 0.15);
-  background: var(--cream-2);
-  font-size: 14px;
-  font-weight: 500;
+  position: relative;
+  padding: 16px;
+  border-radius: var(--radius);
+  border: 1.5px solid rgba(23, 44, 102, 0.08);
+  background: rgba(255, 255, 254, 0.5);
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
-  user-select: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 .chip input { display: none; }
-.chip:hover { border-color: var(--coral); }
+.chip:hover { 
+  border-color: var(--coral);
+  background: var(--white);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
 .chip:has(input:checked) {
   background: var(--ink);
   color: var(--white);
   border-color: var(--ink);
+  box-shadow: var(--shadow);
+}
+@media (max-width: 400px) {
+  .chip-row { grid-template-columns: 1fr; }
 }
 
 /* ── Schedule grid ────────────────────────────────────────── */

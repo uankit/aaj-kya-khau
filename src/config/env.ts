@@ -59,15 +59,6 @@ const envSchema = z.object({
     .string()
     .min(32, 'SESSION_SECRET must be at least 32 chars')
     .default('dev-session-secret-change-me-in-production-please-and-thanks'),
-
-  // Web Push (VAPID). Used by surfaces/webpush to send proactive
-  // notifications to web users. Generate once with:
-  //   node -e "const w=require('web-push');const k=w.generateVAPIDKeys();
-  //            console.log('public:', k.publicKey, '\\nprivate:', k.privateKey);"
-  // Without these, push is no-op (notifications log + skip).
-  VAPID_PUBLIC_KEY: z.string().optional(),
-  VAPID_PRIVATE_KEY: z.string().optional(),
-  VAPID_SUBJECT: z.string().default('mailto:hello@aajkyakhaun.com'),
 });
 
 const parsed = envSchema.safeParse(process.env);

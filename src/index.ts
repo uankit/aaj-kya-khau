@@ -65,11 +65,10 @@ async function bootstrap() {
     prefix: '/static/',
   });
 
-  // Read landing/onboarding/chat HTML once at boot — serve at clean URLs.
+  // Read landing / onboarding / settings HTML once at boot.
   const indexHtml = fs.readFileSync(path.join(publicDir, 'index.html'), 'utf-8');
   const startHtml = fs.readFileSync(path.join(publicDir, 'start.html'), 'utf-8');
   const appHtml = fs.readFileSync(path.join(publicDir, 'app.html'), 'utf-8');
-  const chatHtml = fs.readFileSync(path.join(publicDir, 'chat.html'), 'utf-8');
   const settingsHtml = fs.readFileSync(path.join(publicDir, 'settings.html'), 'utf-8');
   app.get('/', async (_req, reply) => {
     return reply.type('text/html; charset=utf-8').send(indexHtml);
@@ -80,28 +79,8 @@ async function bootstrap() {
   app.get('/app', async (_req, reply) => {
     return reply.type('text/html; charset=utf-8').send(appHtml);
   });
-  app.get('/chat', async (_req, reply) => {
-    return reply.type('text/html; charset=utf-8').send(chatHtml);
-  });
   app.get('/settings', async (_req, reply) => {
     return reply.type('text/html; charset=utf-8').send(settingsHtml);
-  });
-
-  // PWA assets at root scope — service workers can only control paths
-  // up the tree from where they're served. Keeping sw.js at /sw.js gives
-  // it scope over the whole site; serving from /static/ would scope it to
-  // /static/* only and miss /chat.
-  const swJs = fs.readFileSync(path.join(publicDir, 'sw.js'), 'utf-8');
-  const manifestJson = fs.readFileSync(path.join(publicDir, 'manifest.json'), 'utf-8');
-  app.get('/sw.js', async (_req, reply) => {
-    return reply
-      .type('application/javascript; charset=utf-8')
-      .header('Service-Worker-Allowed', '/')
-      .header('Cache-Control', 'no-cache')
-      .send(swJs);
-  });
-  app.get('/manifest.json', async (_req, reply) => {
-    return reply.type('application/manifest+json').send(manifestJson);
   });
 
   // SEO: robots.txt + sitemap.xml at root. Crawlers expect these paths.

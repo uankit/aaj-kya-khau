@@ -72,7 +72,6 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
       timezone: u.timezone,
       onboardingComplete: u.onboardingComplete,
       telegramConnected: u.telegramId !== null,
-      preferredSurface: u.preferredSurface,
       nightlySummaryAt: u.nightlySummaryAt,
       zeptoConnected,
     });
@@ -126,21 +125,6 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
       .where(eq(users.id, u.id));
 
     return reply.send({ ok: true, mealsCount: meals.length });
-  });
-
-  // PATCH /api/me/surface — set the user's preferred chat surface. Idempotent;
-  // safe to call multiple times. Web users skip the bind flow entirely.
-  app.patch('/api/me/surface', { preHandler: requireAuth }, async (request, reply) => {
-    const schema = z.object({ surface: z.enum(['web', 'telegram']) });
-    const parsed = schema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: 'invalid' });
-    const u = request.user!;
-    await db
-      .update(users)
-      .set({ preferredSurface: parsed.data.surface, updatedAt: new Date() })
-      .where(eq(users.id, u.id));
-    log.info(`user=${u.id} surface=${parsed.data.surface}`);
-    return reply.send({ ok: true, surface: parsed.data.surface });
   });
 
   // POST /api/me/bind/start — mint a one-time token + return Telegram deep link.
