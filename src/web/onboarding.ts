@@ -122,6 +122,21 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true, mealsCount: meals.length });
   });
 
+  // PATCH /api/me/surface — set the user's preferred chat surface. Idempotent;
+  // safe to call multiple times. Web users skip the bind flow entirely.
+  app.patch('/api/me/surface', { preHandler: requireAuth }, async (request, reply) => {
+    const schema = z.object({ surface: z.enum(['web', 'telegram']) });
+    const parsed = schema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'invalid' });
+    const u = request.user!;
+    await db
+      .update(users)
+      .set({ preferredSurface: parsed.data.surface, updatedAt: new Date() })
+      .where(eq(users.id, u.id));
+    log.info(`user=${u.id} surface=${parsed.data.surface}`);
+    return reply.send({ ok: true, surface: parsed.data.surface });
+  });
+
   // POST /api/me/bind/start — mint a one-time token + return Telegram deep link.
   app.post('/api/me/bind/start', { preHandler: requireAuth }, async (request, reply) => {
     const u = request.user!;

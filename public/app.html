@@ -116,14 +116,27 @@
       </div>
     </section>
 
-    <!-- Step 4: Connect Telegram -->
+    <!-- Step 4: Pick chat surface -->
     <section class="card" id="step-surface" hidden>
-      <h1>Last step — connect Telegram.</h1>
-      <p class="lede">Tap below. Telegram opens with a one-tap verify message — hit send and you’re in.</p>
+      <h1>Where do you want to chat?</h1>
+      <p class="lede">Pick one — you can switch later from settings.</p>
 
-      <div class="bind-prompt" id="bind-prompt">
+      <div class="surface-grid">
+        <button type="button" class="surface-card" data-surface="web">
+          <span class="surface-icon">💬</span>
+          <span class="surface-name">Right here</span>
+          <span class="surface-hint">Continue on the web</span>
+        </button>
+        <button type="button" class="surface-card" data-surface="telegram">
+          <span class="surface-icon">✈️</span>
+          <span class="surface-name">Telegram</span>
+          <span class="surface-hint">Open in Telegram</span>
+        </button>
+      </div>
+
+      <div class="bind-prompt" id="bind-prompt" hidden>
         <a class="btn btn-primary" id="bind-link" target="_blank" rel="noreferrer">Open Telegram ↗</a>
-        <p class="hint">Don’t have Telegram? Grab it from the App Store / Play Store, sign in, then come back and tap above.</p>
+        <p class="hint">Send the pre-filled message to verify. Don't have Telegram? Pick "Right here" to chat on the web.</p>
       </div>
     </section>
 

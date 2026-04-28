@@ -178,32 +178,86 @@
 
   document.getElementById('zepto-continue').addEventListener('click', () => show('surface'));
 
-  // ── Surface (Telegram only) ────────────────────────────
+  // ── Surface picker ─────────────────────────────────────
+  const bindPromptEl = document.getElementById('bind-prompt');
   const bindLinkEl = document.getElementById('bind-link');
-  let surfaceLoaded = false;
-  async function loadSurfaceStep() {
-    if (surfaceLoaded) return;
-    surfaceLoaded = true;
-    const res = await api('/api/me/bind/start', { method: 'POST' });
+  const surfaceCards = document.querySelectorAll('.surface-card');
+
+  function loadSurfaceStep() {
+    // Reset any prior state when re-entering this step.
+    bindPromptEl.hidden = true;
+    surfaceCards.forEach((c) => c.classList.remove('is-selected'));
+  }
+
+  async function pickSurface(surface) {
+    surfaceCards.forEach((c) => (c.disabled = true));
+    const target = [...surfaceCards].find((c) => c.dataset.surface === surface);
+    target?.classList.add('is-selected');
+
+    const res = await api('/api/me/surface', {
+      method: 'PATCH',
+      body: JSON.stringify({ surface }),
+    });
     if (!res.ok) {
-      alert('Could not generate the Telegram link. Refresh and try again.');
+      alert('Could not save your choice. Try again.');
+      surfaceCards.forEach((c) => (c.disabled = false));
       return;
     }
-    const { deepLink } = await res.json();
+
+    if (surface === 'web') {
+      // No Telegram bind needed. Mark onboarding complete and head to /chat.
+      await api('/api/me/onboarding/complete', { method: 'POST' });
+      const firstName = (me?.name ?? '').trim().split(/\s+/)[0];
+      const titleEl = document.getElementById('done-title');
+      const linkEl = document.getElementById('done-link');
+      const surfaceEl = document.getElementById('done-surface');
+      if (titleEl) {
+        titleEl.textContent = firstName ? `You're all set, ${firstName}.` : "You're all set.";
+      }
+      if (linkEl) {
+        linkEl.href = '/chat';
+        linkEl.removeAttribute('target');
+        linkEl.textContent = 'Open chat →';
+      }
+      if (surfaceEl) surfaceEl.textContent = 'the chat';
+      show('done');
+      return;
+    }
+
+    // surface === 'telegram' → mint bind token, surface deep link.
+    const bindRes = await api('/api/me/bind/start', { method: 'POST' });
+    if (!bindRes.ok) {
+      alert('Could not generate the Telegram link. Try again.');
+      surfaceCards.forEach((c) => (c.disabled = false));
+      return;
+    }
+    const { deepLink } = await bindRes.json();
     bindLinkEl.href = deepLink;
-    document.getElementById('done-link').href = deepLink;
-    document.getElementById('done-surface').textContent = 'Telegram';
+    bindPromptEl.hidden = false;
+
     const firstName = (me?.name ?? '').trim().split(/\s+/)[0];
     const titleEl = document.getElementById('done-title');
+    const linkEl = document.getElementById('done-link');
+    const surfaceEl = document.getElementById('done-surface');
     if (titleEl) {
-      titleEl.textContent = firstName
-        ? `You're all set, ${firstName}.`
-        : "You're all set.";
+      titleEl.textContent = firstName ? `You're all set, ${firstName}.` : "You're all set.";
     }
+    if (linkEl) {
+      linkEl.href = deepLink;
+      linkEl.setAttribute('target', '_blank');
+      linkEl.textContent = 'Open Telegram';
+    }
+    if (surfaceEl) surfaceEl.textContent = 'Telegram';
   }
+
+  surfaceCards.forEach((card) => {
+    card.addEventListener('click', () => pickSurface(card.dataset.surface));
+  });
+
+  // When the user clicks the Telegram deep-link, mark onboarding complete
+  // optimistically and advance the UI; the actual verify happens server-side
+  // when they send /start <token>.
   bindLinkEl.addEventListener('click', async () => {
-    // The user is leaving for Telegram. Mark onboarding complete optimistically;
-    // the actual verify happens when they send /start <token>.
     await api('/api/me/onboarding/complete', { method: 'POST' });
     setTimeout(() => show('done'), 1200);
   });
