@@ -41,13 +41,35 @@
   }
 
   async function loadMe() {
-    const res = await api('/api/me');
+    let res;
+    try {
+      res = await api('/api/me');
+    } catch (err) {
+      showLoadFailure('Network blip.');
+      throw err;
+    }
     if (res.status === 401) {
       window.location.href = '/start';
       return;
     }
-    me = await res.json();
+    if (!res.ok) {
+      showLoadFailure(`Server returned ${res.status}.`);
+      return;
+    }
+    try {
+      me = await res.json();
+    } catch (err) {
+      showLoadFailure('Bad server response.');
+      throw err;
+    }
     decideStep();
+  }
+
+  function showLoadFailure(why) {
+    if (!loadingEl) return;
+    loadingEl.innerHTML =
+      `<p class="hint">Couldn’t load your account — ${why} ` +
+      `<a href="javascript:location.reload()">Try again</a> or <a href="/start">sign in again</a>.</p>`;
   }
 
   function decideStep() {
