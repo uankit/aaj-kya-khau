@@ -100,6 +100,20 @@ async function bootstrap() {
     return reply.type('application/manifest+json').send(manifestJson);
   });
 
+  // SEO: robots.txt + sitemap.xml at root. Crawlers expect these paths.
+  // PUBLIC_BASE_URL drives the absolute URLs in the sitemap so we don't
+  // accidentally publish staging URLs to Google.
+  const canonical = (env.PUBLIC_BASE_URL ?? 'https://aajkyakhaun.com').replace(/\/$/, '');
+  const robotsTxt = `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /auth/\nSitemap: ${canonical}/sitemap.xml\n`;
+  const sitemapXml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>${canonical}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>
+  <url><loc>${canonical}/start</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>
+</urlset>
+`;
+  app.get('/robots.txt', async (_req, reply) => reply.type('text/plain').send(robotsTxt));
+  app.get('/sitemap.xml', async (_req, reply) => reply.type('application/xml').send(sitemapXml));
+
   await app.register(healthRoutes);
   await app.register(webhookRoutes);
   await app.register(webRoutes);

@@ -1,43 +1,117 @@
 /* =========================================================
    Aaj Kya Khaun — Landing page JS
-   Scroll reveal + subtle parallax. Keep it lean.
+   • Email signup forms (hero + final CTA)
+   • Subtle scroll reveal + parallax + chat-bubble replay
    ========================================================= */
 
 (function () {
   'use strict';
 
-  // Respect reduced motion
+  // Year auto-update in footer.
+  const yearEl = document.getElementById('year');
+  if (yearEl) yearEl.textContent = new Date().getFullYear();
+
+  // ─────────────────────────────────────────────────────────
+  // 1. EMAIL SIGNUP — hero + final CTA share the same handler.
+  //    POSTs to /api/auth/magic-link; on success swaps the form
+  //    for a "check your inbox" message inline.
+  // ─────────────────────────────────────────────────────────
+  function bindSignup({ formId, inputId, errorId, sentId, sentEmailId }) {
+    const form = document.getElementById(formId);
+    const input = document.getElementById(inputId);
+    const err = document.getElementById(errorId);
+    const sent = document.getElementById(sentId);
+    const sentEmail = sentEmailId ? document.getElementById(sentEmailId) : null;
+    if (!form || !input || !err || !sent) return;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.hidden = true;
+      const email = input.value.trim();
+      if (!email) return;
+
+      const btn = form.querySelector('button[type=submit]');
+      if (btn) btn.disabled = true;
+
+      let res;
+      try {
+        res = await fetch('/api/auth/magic-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+      } catch {
+        err.textContent = 'Network blip. Try once more.';
+        err.hidden = false;
+        if (btn) btn.disabled = false;
+        return;
+      }
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        err.textContent =
+          data.error === 'invalid email'
+            ? "That email looks off. Check the spelling?"
+            : "Something went wrong. Try again in a minute.";
+        err.hidden = false;
+        if (btn) btn.disabled = false;
+        return;
+      }
+
+      if (sentEmail) sentEmail.textContent = email;
+      form.hidden = true;
+      sent.hidden = false;
+    });
+  }
+
+  bindSignup({
+    formId: 'hero-signup',
+    inputId: 'hero-email',
+    errorId: 'hero-error',
+    sentId: 'hero-sent',
+    sentEmailId: 'hero-sent-email',
+  });
+  bindSignup({
+    formId: 'footer-signup',
+    inputId: 'footer-email',
+    errorId: 'footer-error',
+    sentId: 'footer-sent',
+    sentEmailId: 'footer-sent-email',
+  });
+
+  // ─────────────────────────────────────────────────────────
+  // Motion-sensitive eye-candy. Bail out for users who asked.
+  // ─────────────────────────────────────────────────────────
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (prefersReducedMotion) return;
 
-  // ----- 1. SCROLL REVEAL -----
-  // Add .reveal to sections, observe with IntersectionObserver
+  // 2. Scroll reveal — light touch.
   const revealTargets = document.querySelectorAll(
-    '.why, .features, .how, .science, .final-cta, .feature-card, .citation-card, .why-card, .step',
+    '.wedge, .flows, .how, .vs, .trust, .faq, .final-cta, .flow-card, .step, .vs-col, .trust-list li, .faq-item, .wedge-list li',
   );
-
   revealTargets.forEach((el) => el.classList.add('reveal'));
 
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('in');
-          observer.unobserve(entry.target);
-        }
-      });
-    },
-    { threshold: 0.12, rootMargin: '0px 0px -40px 0px' },
-  );
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('in');
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.08, rootMargin: '0px 0px -40px 0px' },
+    );
+    revealTargets.forEach((el) => observer.observe(el));
+  } else {
+    revealTargets.forEach((el) => el.classList.add('in'));
+  }
 
-  revealTargets.forEach((el) => observer.observe(el));
-
-  // ----- 2. PARALLAX ON HERO BLOBS -----
-  // Very subtle — blobs drift with scroll
+  // 3. Hero blob parallax — very subtle.
   const blobs = document.querySelectorAll('.blob');
   let latestScrollY = window.scrollY;
   let ticking = false;
-
   function updateParallax() {
     blobs.forEach((blob, i) => {
       const factor = (i + 1) * 0.05;
@@ -45,7 +119,6 @@
     });
     ticking = false;
   }
-
   window.addEventListener(
     'scroll',
     () => {
@@ -58,25 +131,9 @@
     { passive: true },
   );
 
-  // ----- 3. HERO TITLE LAYERED HOVER -----
-  // Slight mouse tracking on the hero heading for depth
-  const hero = document.querySelector('.hero-title');
-  if (hero) {
-    hero.addEventListener('mousemove', (e) => {
-      const rect = hero.getBoundingClientRect();
-      const x = (e.clientX - rect.left - rect.width / 2) / rect.width;
-      const y = (e.clientY - rect.top - rect.height / 2) / rect.height;
-      hero.style.transform = `perspective(1000px) rotateY(${x * 2}deg) rotateX(${-y * 2}deg)`;
-    });
-    hero.addEventListener('mouseleave', () => {
-      hero.style.transform = 'perspective(1000px) rotateY(0) rotateX(0)';
-    });
-  }
-
-  // ----- 4. CHAT BUBBLES RE-PLAY ON IN-VIEW -----
-  // Replay the bubble animation when the chat mockup first scrolls into view
+  // 4. Chat-bubble replay when the hero chat enters the viewport.
   const chatFrame = document.querySelector('.chat-frame');
-  if (chatFrame) {
+  if (chatFrame && 'IntersectionObserver' in window) {
     const chatObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
