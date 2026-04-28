@@ -32,15 +32,15 @@
           <span class="field-label">Your name</span>
           <input type="text" name="name" placeholder="Ankit" maxlength="80" required />
         </label>
-        <fieldset class="field">
-          <legend class="field-label">Diet</legend>
-          <div class="chip-row" role="radiogroup">
+        <div class="field">
+          <span class="field-label">Diet</span>
+          <div class="chip-row" role="radiogroup" aria-label="Diet">
             <label class="chip"><input type="radio" name="dietType" value="veg" /> 🌿 Veg</label>
             <label class="chip"><input type="radio" name="dietType" value="egg" /> 🥚 Eggetarian</label>
             <label class="chip"><input type="radio" name="dietType" value="non-veg" /> 🍗 Non-veg</label>
             <label class="chip"><input type="radio" name="dietType" value="vegan" /> 🌱 Vegan</label>
           </div>
-        </fieldset>
+        </div>
         <button type="submit" class="btn btn-primary">Continue</button>
       </form>
     </section>
@@ -87,32 +87,48 @@
     <!-- Step 3: Connect Zepto -->
     <section class="card" id="step-zepto" hidden>
       <h1>Connect Zepto.</h1>
-      <p class="lede">I’ll read your last 30 orders to pre-load your kitchen, and use Zepto to restock when something runs out. Read-only until you confirm an order.</p>
+      <p class="lede">I’ll use your past 30 orders to pre-load your kitchen — and order anything you’re missing on Zepto, only when you confirm.</p>
 
-      <div class="connector-state" id="zepto-not-connected">
-        <ol class="step-list">
-          <li>Click <strong>Open Zepto auth</strong>. A new tab opens.</li>
-          <li>Log in to Zepto if asked.</li>
-          <li>You’ll land on a Postman page with a long code. Copy it.</li>
-          <li>Paste the code below and hit <strong>Connect</strong>.</li>
+      <!-- Stage 1: Authorize. Becomes hidden once the auth tab is opened. -->
+      <div class="zepto-stage" id="zepto-stage-auth">
+        <ol class="step-list compact">
+          <li>Tap <strong>Open Zepto</strong>. A new tab opens.</li>
+          <li>Log in if Zepto asks.</li>
+          <li>You’ll land on a page with a long code — copy the whole URL.</li>
         </ol>
-        <div class="btn-row">
-          <button type="button" class="btn btn-ghost" id="zepto-open">Open Zepto auth ↗</button>
-        </div>
-        <label class="field">
-          <span class="field-label">Auth code or callback URL</span>
-          <input type="text" id="zepto-code" placeholder="paste the code OR the whole postman://… URL" autocomplete="off" />
-        </label>
-        <p class="form-error" id="zepto-error" hidden></p>
-        <button type="button" class="btn btn-primary" id="zepto-connect">Connect Zepto</button>
-        <p class="hint">Why a paste? Zepto hasn’t whitelisted our domain yet — we’re using their dev callback for now. One-click flow lands once we partner with them.</p>
+        <button type="button" class="btn btn-primary btn-block" id="zepto-open">
+          Open Zepto ↗
+        </button>
       </div>
 
-      <div class="connector-state success-state" id="zepto-connected" hidden>
+      <!-- Stage 2: Paste. Revealed after the user opens the auth tab. -->
+      <div class="zepto-stage" id="zepto-stage-paste" hidden>
+        <label class="field">
+          <span class="field-label">Paste the URL or code from Zepto</span>
+          <input
+            type="text"
+            id="zepto-code"
+            placeholder="postman://…  or just the code"
+            autocomplete="off"
+          />
+        </label>
+        <p class="form-error" id="zepto-error" hidden></p>
+        <button type="button" class="btn btn-primary btn-block" id="zepto-connect">
+          Connect Zepto
+        </button>
+        <button type="button" class="btn-link" id="zepto-reopen">
+          Didn’t see the code? Open Zepto again
+        </button>
+      </div>
+
+      <!-- Stage 3: Success. Only shown after a verified connection. -->
+      <div class="zepto-stage success-state" id="zepto-connected" hidden>
         <div class="emoji-stack">✅</div>
         <h2 id="zepto-connected-title">Zepto is connected.</h2>
-        <p class="lede">I’m loading your pantry from your past orders in the background — you can continue.</p>
-        <button type="button" class="btn btn-primary" id="zepto-continue">Continue</button>
+        <p class="lede">Loading your pantry from past orders. Almost done.</p>
+        <button type="button" class="btn btn-primary btn-block" id="zepto-continue">
+          Continue
+        </button>
       </div>
     </section>
 

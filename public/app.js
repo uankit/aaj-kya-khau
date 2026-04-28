@@ -104,31 +104,49 @@
   });
   document.getElementById('schedule-defaults').addEventListener('click', () => submitSchedule(true));
 
-  // ── Zepto ──────────────────────────────────────────────
-  const zeptoNotConnected = document.getElementById('zepto-not-connected');
+  // ── Zepto (3 stages: auth → paste → success) ───────────
+  const zeptoStageAuth = document.getElementById('zepto-stage-auth');
+  const zeptoStagePaste = document.getElementById('zepto-stage-paste');
   const zeptoConnected = document.getElementById('zepto-connected');
   const zeptoOpenBtn = document.getElementById('zepto-open');
+  const zeptoReopenBtn = document.getElementById('zepto-reopen');
   const zeptoConnectBtn = document.getElementById('zepto-connect');
   const zeptoCodeInput = document.getElementById('zepto-code');
   const zeptoErr = document.getElementById('zepto-error');
 
-  zeptoOpenBtn.addEventListener('click', async () => {
-    zeptoOpenBtn.disabled = true;
-    zeptoOpenBtn.textContent = 'opening…';
+  function showZeptoStage(stage) {
+    zeptoStageAuth.hidden = stage !== 'auth';
+    zeptoStagePaste.hidden = stage !== 'paste';
+    zeptoConnected.hidden = stage !== 'success';
+  }
+
+  async function startZeptoAuth(triggerBtn) {
+    if (triggerBtn) {
+      triggerBtn.disabled = true;
+      triggerBtn.textContent = 'opening…';
+    }
     const res = await api('/api/oauth/zepto/start', { method: 'POST' });
-    zeptoOpenBtn.disabled = false;
-    zeptoOpenBtn.textContent = 'Open Zepto auth ↗';
+    if (triggerBtn) triggerBtn.disabled = false;
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       zeptoErr.textContent = data.error === 'zepto_not_configured'
-        ? 'Zepto OAuth client is not configured on the server.'
-        : 'Could not start Zepto auth. Try again.';
+        ? 'Zepto OAuth is not configured on the server.'
+        : 'Could not open Zepto. Try again.';
       zeptoErr.hidden = false;
+      if (triggerBtn) triggerBtn.textContent = 'Open Zepto ↗';
       return;
     }
     const { authUrl } = await res.json();
     window.open(authUrl, '_blank', 'noopener,noreferrer');
-  });
+    if (triggerBtn) triggerBtn.textContent = 'Open Zepto ↗';
+    // Move to the paste stage and focus the input so the user can
+    // paste straight away.
+    showZeptoStage('paste');
+    setTimeout(() => zeptoCodeInput.focus(), 80);
+  }
+
+  zeptoOpenBtn.addEventListener('click', () => startZeptoAuth(zeptoOpenBtn));
+  zeptoReopenBtn.addEventListener('click', () => startZeptoAuth(null));
 
   zeptoConnectBtn.addEventListener('click', async () => {
     zeptoErr.hidden = true;
@@ -138,7 +156,7 @@
     const m = raw.match(/[?&]code=([^&\s]+)/);
     const code = m ? decodeURIComponent(m[1]) : raw;
     if (!code) {
-      zeptoErr.textContent = 'Paste the code or the whole callback URL.';
+      zeptoErr.textContent = 'Paste the URL or code from the Zepto page.';
       zeptoErr.hidden = false;
       return;
     }
@@ -153,13 +171,12 @@
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       const map = {
-        no_pending_oauth_or_expired: 'That auth window expired. Click "Open Zepto auth" again.',
-        exchange_failed: 'Code rejected. Make sure you copied the whole code.',
-        verify_failed:
-          "Code accepted but Zepto didn't recognise the session. Try the auth flow again.",
-        zepto_not_configured: 'Zepto OAuth client is not configured on the server.',
+        no_pending_oauth_or_expired: 'That window expired — open Zepto again.',
+        exchange_failed: "That code didn't work. Copy the whole URL and try once more.",
+        verify_failed: "Connection didn't stick. Open Zepto again and re-paste.",
+        zepto_not_configured: 'Zepto OAuth is not configured on the server.',
       };
-      zeptoErr.textContent = map[data.error] ?? 'Could not connect Zepto. Try again.';
+      zeptoErr.textContent = map[data.error] ?? 'Could not connect. Try again.';
       zeptoErr.hidden = false;
       return;
     }
@@ -167,13 +184,10 @@
     const name = data.profile?.name?.trim();
     const titleEl = document.getElementById('zepto-connected-title');
     if (titleEl) {
-      titleEl.textContent = name
-        ? `Connected as ${name}.`
-        : 'Zepto is connected.';
+      titleEl.textContent = name ? `Connected as ${name}.` : 'Zepto is connected.';
     }
     me.zeptoConnected = true;
-    zeptoNotConnected.hidden = true;
-    zeptoConnected.hidden = false;
+    showZeptoStage('success');
   });
 
   document.getElementById('zepto-continue').addEventListener('click', () => show('surface'));

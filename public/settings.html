@@ -33,15 +33,15 @@
           <span class="field-label">Name</span>
           <input type="text" name="name" id="f-name" maxlength="80" required />
         </label>
-        <fieldset class="field">
-          <legend class="field-label">Diet</legend>
-          <div class="chip-row" role="radiogroup">
+        <div class="field">
+          <span class="field-label">Diet</span>
+          <div class="chip-row" role="radiogroup" aria-label="Diet">
             <label class="chip"><input type="radio" name="dietType" value="veg" /> 🌿 Veg</label>
             <label class="chip"><input type="radio" name="dietType" value="egg" /> 🥚 Eggetarian</label>
             <label class="chip"><input type="radio" name="dietType" value="non-veg" /> 🍗 Non-veg</label>
             <label class="chip"><input type="radio" name="dietType" value="vegan" /> 🌱 Vegan</label>
           </div>
-        </fieldset>
+        </div>
         <label class="field">
           <span class="field-label">Timezone</span>
           <input type="text" name="timezone" id="f-timezone" maxlength="40" placeholder="Asia/Kolkata" />

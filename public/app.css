@@ -2,6 +2,11 @@
    App / onboarding pages — extends styles.css design tokens.
    ========================================================= */
 
+/* HTML's [hidden] is supposed to set display:none, but any block-level
+   `display:` rule we add (flex, grid, etc.) wins on specificity. Force
+   the attribute to take precedence everywhere. */
+[hidden] { display: none !important; }
+
 .app-body {
   min-height: 100vh;
   background:
@@ -196,6 +201,45 @@
   flex-wrap: wrap;
   margin-top: 8px;
 }
+
+/* Full-width primary action — used in the Zepto step where there's
+   one CTA per stage. */
+.btn-block { width: 100%; justify-content: center; }
+
+/* Subtle text-link styled button — for "Didn't see it? Reopen". */
+.btn-link {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 6px 0;
+  text-decoration: underline;
+  text-decoration-color: rgba(107, 124, 147, 0.4);
+  text-underline-offset: 3px;
+  transition: color 0.15s;
+}
+.btn-link:hover { color: var(--ink); }
+
+/* Tighter list spacing for inline instructions inside the Zepto step. */
+.step-list.compact {
+  margin-bottom: 18px;
+  padding: 14px 16px 14px 36px;
+  list-style: decimal outside;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.step-list.compact li { margin: 0; }
+
+/* Stages stack vertically with the same gap as form fields. */
+.zepto-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.zepto-stage.success-state { align-items: flex-start; }
 
 /* ── Chips (radio group) ──────────────────────────────────── */
 .chip-row {
