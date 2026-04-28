@@ -21,6 +21,7 @@ import { db } from '../config/database.js';
 import { messages, users } from '../db/schema.js';
 import { model } from '../llm/client.js';
 import { sendHtml } from '../surfaces/telegram/index.js';
+import { sendPushToUser } from '../surfaces/webpush/adapter.js';
 import { parseAndSaveInvoice } from '../domain/orders/invoice.js';
 import { hasZeptoConnected } from '../providers/grocery/zepto/account.js';
 import { loadContext } from './context.js';
@@ -74,6 +75,16 @@ export async function handleTurn(userId: string, trigger: AgentTrigger): Promise
 }
 
 async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promise<void> {
+  // Outbound options for THIS turn — every sendAndPersist within the
+  // same turn shares them. Proactive nudge/nightly turns get a Web Push
+  // notification on the web surface; reply turns don't.
+  const sendOpts: SendOpts =
+    trigger.type === 'nudge'
+      ? { proactive: true, kind: 'meal_nudge' }
+      : trigger.type === 'nightly'
+        ? { proactive: true, kind: 'nightly_summary' }
+        : {};
+
   try {
     // ── 1. Persist the raw user message (for message-type triggers) ────────
     if (trigger.type === 'message') {
@@ -139,6 +150,7 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
         await sendAndPersist(
           userId,
           'Zepto isn\'t connected yet. Connect your account at <a href="https://aajkyakhaun.com/app">aajkyakhaun.com/app</a> so I can place orders for you 🛒',
+          sendOpts,
         );
         return;
       }
@@ -147,7 +159,7 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
         message: trigger.text,
         orderItems,
       });
-      await sendAndPersist(userId, reply.text);
+      await sendAndPersist(userId, reply.text, sendOpts);
       return;
     }
 
@@ -233,12 +245,12 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
     if (replyText.length === 0) {
       log.warn(`Empty LLM response for user ${userId}; falling back.`);
       const fallback = "Hmm, I didn't quite catch that. Could you try rephrasing?";
-      await sendAndPersist(userId, fallback);
+      await sendAndPersist(userId, fallback, sendOpts);
       return;
     }
 
     // ── 6 + 7. Persist + send ─────────────────────────────────────────────
-    await sendAndPersist(userId, replyText);
+    await sendAndPersist(userId, replyText, sendOpts);
     log.debug(`Agent turn complete for ${userId}`, {
       toolCalls: result.toolCalls?.length ?? 0,
       steps: result.steps?.length ?? 0,
@@ -262,7 +274,7 @@ async function handleTurnUnlocked(userId: string, trigger: AgentTrigger): Promis
     // keeps user+assistant messages paired so the next turn's context
     // doesn't show an orphan user message without a reply.
     try {
-      await sendAndPersist(userId, fallback);
+      await sendAndPersist(userId, fallback, sendOpts);
     } catch (sendErr) {
       // If Telegram is ALSO down, at least the error is logged. The user
       // will see silence but there's nothing we can do about it from here.
@@ -334,10 +346,26 @@ function sleep(ms: number): Promise<void> {
  * the user already got their reply and retrying would double-send. The
  * history will have a one-turn gap which is much better than a double text.
  */
-async function sendAndPersist(userId: string, text: string): Promise<void> {
+interface SendOpts {
+  /**
+   * True when this message originates from a cron-fired nudge / nightly
+   * summary rather than a direct user message. Web users get a Web Push
+   * notification only when proactive=true; for reply turns they're
+   * already looking at the chat.
+   */
+  proactive?: boolean;
+  /** Coarse kind label for push tag grouping — falls back to 'akk-default'. */
+  kind?: 'meal_nudge' | 'nightly_summary' | 'order_update';
+}
+
+async function sendAndPersist(
+  userId: string,
+  text: string,
+  opts: SendOpts = {},
+): Promise<void> {
   const user = await db.query.users.findFirst({
     where: eq(users.id, userId),
-    columns: { telegramId: true, preferredSurface: true },
+    columns: { telegramId: true, preferredSurface: true, name: true },
   });
   if (!user) return;
 
@@ -372,5 +400,50 @@ async function sendAndPersist(userId: string, text: string): Promise<void> {
   } catch (err) {
     log.error(`web persist failed for user=${userId}`, err);
   }
+
+  // For proactive turns, also fire a Web Push notification so the user
+  // sees the nudge without /chat being open. Reply-to-user turns skip
+  // this — they're already looking at the page.
+  if (opts.proactive) {
+    sendPushToUser(userId, {
+      title: titleFor(opts.kind, user.name),
+      body: stripHtmlForNotification(text),
+      url: '/chat',
+      tag: opts.kind ?? 'akk-default',
+      renotify: true,
+    }).catch((err) => log.warn(`push failed for user=${userId}`, err));
+  }
+}
+
+function titleFor(
+  kind: SendOpts['kind'],
+  name: string | null,
+): string {
+  const first = (name ?? '').trim().split(/\s+/)[0] || 'there';
+  switch (kind) {
+    case 'meal_nudge':
+      return `Aaj kya khau, ${first}?`;
+    case 'nightly_summary':
+      return `Today's wrap, ${first}`;
+    case 'order_update':
+      return `Order update`;
+    default:
+      return 'Aaj Kya Khaun';
+  }
+}
+
+/** Strip HTML for plain notification body; cap to a sane length. */
+function stripHtmlForNotification(html: string): string {
+  const txt = html
+    .replace(/<\s*br\s*\/?\s*>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  return txt.length > 240 ? txt.slice(0, 237) + '…' : txt;
 }
 
