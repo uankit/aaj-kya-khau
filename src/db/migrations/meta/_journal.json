@@ -106,6 +106,13 @@
       "when": 1777386934716,
       "tag": "0014_natural_black_panther",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1777387893638,
+      "tag": "0015_absent_gorilla_man",
+      "breakpoints": true
     }
   ]
 }

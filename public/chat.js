@@ -218,6 +218,8 @@
       }
       const data = await res.json();
       (data.replies ?? []).forEach((m) => appendMessage(m));
+      // First successful exchange unlocks the push opt-in nudge.
+      if ((data.replies ?? []).length > 0) maybeOfferPush();
     } catch (err) {
       appendMessage({
         id: 'err-' + Date.now(),
@@ -263,17 +265,124 @@
   });
 
   // ─────────────────────────────────────────────────────────────
-  // Service worker — registered once on first chat load. Scope is /
-  // because sw.js is served from the root by the Fastify route.
-  // The push subscription itself happens in a later phase, gated on
-  // user permission.
+  // Service worker + Web Push.
+  //
+  // Register the SW on every chat load. After it's ready:
+  //   • Skip if the browser has no Push or Notification API.
+  //   • Skip if permission is 'denied' (don't keep asking).
+  //   • If 'granted' AND no subscription on this device → subscribe + POST.
+  //   • If 'default' → wait for the user to opt-in via the soft prompt
+  //     (rendered after their first agent reply, see maybeOfferPush).
   // ─────────────────────────────────────────────────────────────
+  let swReady = null;
+
   function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker
+    swReady = navigator.serviceWorker
       .register('/sw.js', { scope: '/' })
+      .then(() => navigator.serviceWorker.ready)
       // eslint-disable-next-line no-console
-      .catch((err) => console.warn('sw register failed', err));
+      .catch((err) => {
+        console.warn('sw register failed', err);
+        return null;
+      });
+  }
+
+  function urlBase64ToUint8Array(base64) {
+    const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+    const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(b64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  async function fetchVapidKey() {
+    try {
+      const res = await fetch('/api/push/vapid-key');
+      const data = await res.json();
+      return data.configured ? data.publicKey : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Sync subscription state. If permission is granted and we don't yet
+   * have a PushSubscription on this device, create + ship it. Idempotent.
+   */
+  async function syncPushSubscription() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    if (!swReady) return;
+    const reg = await swReady;
+    if (!reg) return;
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const publicKey = await fetchVapidKey();
+      if (!publicKey) return; // server not configured
+      try {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('push subscribe failed', err);
+        return;
+      }
+    }
+    try {
+      await api('/api/me/push/subscribe', {
+        method: 'POST',
+        body: JSON.stringify(sub.toJSON()),
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('push subscribe POST failed', err);
+    }
+  }
+
+  /**
+   * Soft permission prompt — shown once after the user's first successful
+   * agent reply (so they understand what they're opting into). Gracefully
+   * skipped when permission is already decided.
+   */
+  let pushOffered = false;
+  async function maybeOfferPush() {
+    if (pushOffered) return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'default') {
+      // Already granted → sync; denied → never bother again.
+      if (Notification.permission === 'granted') await syncPushSubscription();
+      pushOffered = true;
+      return;
+    }
+    pushOffered = true;
+    // Tiny inline banner in the thread, action chip to grant.
+    const li = document.createElement('li');
+    li.className = 'chat-msg from-assistant';
+    li.innerHTML = `
+      <div class="chat-bubble-wrap">
+        <div class="chat-bubble">
+          Want me to ping you at meal times? I'll only nudge you at the times you set.
+          <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="chip suggest" id="push-yes">Turn on nudges</button>
+            <button class="chip suggest" id="push-no" style="opacity:0.6;">Not now</button>
+          </div>
+        </div>
+      </div>`;
+    threadEl.appendChild(li);
+    scrollToBottom();
+    document.getElementById('push-yes').addEventListener('click', async () => {
+      li.remove();
+      const result = await Notification.requestPermission();
+      if (result === 'granted') await syncPushSubscription();
+    });
+    document.getElementById('push-no').addEventListener('click', () => {
+      li.remove();
+    });
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -285,6 +394,10 @@
       await loadHistory();
       inputEl.focus();
       registerServiceWorker();
+      // Already-granted permission? Make sure backend has our subscription.
+      if ('Notification' in window && Notification.permission === 'granted') {
+        syncPushSubscription();
+      }
     } catch (err) {
       // 401 handler in api() already redirected; otherwise log.
       // eslint-disable-next-line no-console

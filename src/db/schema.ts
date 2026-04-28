@@ -160,6 +160,33 @@ export const bindTokens = pgTable(
 );
 
 /* ------------------------------------------------------------------ */
+/* web_push_subscriptions — per-device PushManager subscriptions for  */
+/* users on preferred_surface='web'. One row per browser/device, keyed */
+/* by endpoint (the URL the push service routes through).             */
+/* ------------------------------------------------------------------ */
+
+export const webPushSubscriptions = pgTable(
+  'web_push_subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Push service URL — globally unique. */
+    endpoint: text('endpoint').notNull(),
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    userAgent: varchar('user_agent', { length: 200 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    userIdx: index('web_push_subs_user_idx').on(table.userId),
+    endpointUnique: uniqueIndex('web_push_subs_endpoint_unique').on(table.endpoint),
+  }),
+);
+
+/* ------------------------------------------------------------------ */
 /* magic_link_tokens — email-based passwordless sign-in.              */
 /*                                                                    */
 /* Issued when a user submits their email; consumed when they click   */
@@ -564,3 +591,5 @@ export type BindToken = typeof bindTokens.$inferSelect;
 export type NewBindToken = typeof bindTokens.$inferInsert;
 export type MagicLinkToken = typeof magicLinkTokens.$inferSelect;
 export type WebSession = typeof webSessions.$inferSelect;
+export type WebPushSubscription = typeof webPushSubscriptions.$inferSelect;
+export type NewWebPushSubscription = typeof webPushSubscriptions.$inferInsert;
