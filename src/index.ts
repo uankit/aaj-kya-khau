@@ -20,6 +20,7 @@ const __dirname = path.dirname(__filename);
 // or dist (prod). In both cases, go up from this file's dir to find /public.
 function resolvePublicDir(): string {
   const candidates = [
+    path.resolve(__dirname, 'public'),             // dist/index.js with public copied into dist/public
     path.resolve(__dirname, '..', 'public'),       // dist/index.js → <root>/public
     path.resolve(__dirname, '..', '..', 'public'), // src/index.ts  → <root>/public
   ];
