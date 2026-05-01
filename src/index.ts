@@ -96,6 +96,9 @@ async function bootstrap() {
 `;
   app.get('/robots.txt', async (_req, reply) => reply.type('text/plain').send(robotsTxt));
   app.get('/sitemap.xml', async (_req, reply) => reply.type('application/xml').send(sitemapXml));
+  app.get('/sw.js', async (_req, reply) =>
+    reply.type('application/javascript; charset=utf-8').send('// no service worker\n'),
+  );
 
   await app.register(healthRoutes);
   await app.register(webhookRoutes);

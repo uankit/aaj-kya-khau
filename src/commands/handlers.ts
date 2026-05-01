@@ -68,6 +68,8 @@ export interface CommandContext {
   user: User;
   /** True if the user was just created in this request (first-ever contact). */
   created: boolean;
+  surface?: 'telegram';
+  externalId?: string;
 }
 
 /**
@@ -108,24 +110,24 @@ async function handleStart(ctx: CommandContext): Promise<boolean> {
   // Mid-onboarding (legacy users who never finished). Web is now the
   // single onboarding surface — point them there.
   if (!user.onboardingComplete) {
-    await sendHtml(
-      user.telegramId!,
+    await replyHtml(
+      ctx,
       'Looks like setup isn\'t finished. Head to ' +
         '<a href="https://aajkyakhaun.com/start">aajkyakhaun.com/start</a> to wrap it up.',
     );
     return true;
   }
 
-  await sendHtml(user.telegramId!, welcomeBackText(user.name), {
+  await replyHtml(ctx, welcomeBackText(user.name), {
     inlineKeyboard: MAIN_MENU_KEYBOARD,
   });
-  log.info(`/start returning user ${user.telegramId}`);
+  log.info(`/start returning user ${user.id}`);
   return true;
 }
 
 async function handleHelp(ctx: CommandContext): Promise<boolean> {
-  await sendHtml(ctx.user.telegramId!, HELP_TEXT, { inlineKeyboard: MAIN_MENU_KEYBOARD });
-  log.info(`/help sent to ${ctx.user.telegramId}`);
+  await replyHtml(ctx, HELP_TEXT, { inlineKeyboard: MAIN_MENU_KEYBOARD });
+  log.info(`/help sent to ${ctx.user.id}`);
   return true;
 }
 
@@ -150,34 +152,44 @@ async function handleMute(ctx: CommandContext): Promise<boolean> {
   }
   unregisterNightlyCron(user.id);
 
-  await sendHtml(
-    user.telegramId!,
+  await replyHtml(
+    ctx,
     `🤫 <b>All reminders paused.</b>
 
 Just say something like <code>remind me for breakfast at 9</code> or use <b>/schedule</b> to turn them back on whenever.`,
   );
-  log.info(`/mute: ${user.telegramId} paused ${schedules.length} schedules`);
+  log.info(`/mute: ${user.id} paused ${schedules.length} schedules`);
   return true;
 }
 
 async function handleZeptoMoved(ctx: CommandContext): Promise<boolean> {
-  await sendHtml(
-    ctx.user.telegramId!,
+  await replyHtml(
+    ctx,
     `Connecting Zepto now happens on the web — head to ` +
       `<a href="https://aajkyakhaun.com/app">aajkyakhaun.com/app</a>, ` +
       `link your account, and you're set 🛒`,
   );
-  log.info(`/connect_zepto redirect issued to ${ctx.user.telegramId}`);
+  log.info(`/connect_zepto redirect issued to ${ctx.user.id}`);
   return true;
 }
 
 async function handleFeedback(ctx: CommandContext): Promise<boolean> {
-  await sendHtml(
-    ctx.user.telegramId!,
+  await replyHtml(
+    ctx,
     `<b>Tell me what's on your mind</b> 💭
 
 Anything — features you want, things that broke, random thoughts. I'm listening.`,
   );
-  log.info(`/feedback prompt sent to ${ctx.user.telegramId}`);
+  log.info(`/feedback prompt sent to ${ctx.user.id}`);
   return true;
+}
+
+async function replyHtml(
+  ctx: CommandContext,
+  html: string,
+  options?: { inlineKeyboard?: TelegramInlineKeyboard },
+): Promise<void> {
+  if (ctx.user.telegramId) {
+    await sendHtml(ctx.user.telegramId, html, options);
+  }
 }

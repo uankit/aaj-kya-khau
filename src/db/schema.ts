@@ -444,7 +444,7 @@ export type NewDefaultPantryItem = typeof defaultPantryItems.$inferInsert;
 export const webhookDedup = pgTable(
   'webhook_dedup',
   {
-    messageSid: varchar('message_sid', { length: 64 }).primaryKey(),
+    messageSid: varchar('message_sid', { length: 200 }).primaryKey(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({

@@ -14,7 +14,10 @@ import { env } from '../config/env.js';
 import { db } from '../config/database.js';
 import { webhookDedup } from '../db/schema.js';
 import { bot, parseIncoming, sendHtml, sendText, type IncomingMessage } from '../surfaces/telegram/index.js';
-import { consumeBindToken, extractTelegramBindToken } from '../domain/identity/bind.js';
+import {
+  consumeBindToken,
+  extractTelegramBindToken,
+} from '../domain/identity/bind.js';
 import { findUserByTelegramId } from '../services/user.js';
 import { handleTurn } from '../agent/agent.js';
 import { getTelegramBotUrl } from '../surfaces/telegram/bot-info.js';
@@ -221,7 +224,12 @@ async function processMessage(incoming: IncomingMessage): Promise<void> {
 
   // Short-circuit specific slash commands (/start, /help, /mute, /feedback).
   // Everything else falls through to the LLM agent.
-  const commandHandled = await tryHandleCommand(incoming.body, { user, created: false });
+  const commandHandled = await tryHandleCommand(incoming.body, {
+    user,
+    created: false,
+    surface: 'telegram',
+    externalId: incoming.telegramId,
+  });
   if (commandHandled) return;
 
   await handleTurn(user.id, {

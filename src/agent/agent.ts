@@ -20,7 +20,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../config/database.js';
 import { messages, users } from '../db/schema.js';
 import { model } from '../llm/client.js';
-import { sendHtml } from '../surfaces/telegram/index.js';
+import { deliver, type SurfaceName } from '../surfaces/index.js';
 import { parseAndSaveInvoice } from '../domain/orders/invoice.js';
 import { hasZeptoConnected } from '../providers/grocery/zepto/account.js';
 import { loadContext } from './context.js';
@@ -337,26 +337,36 @@ function sleep(ms: number): Promise<void> {
 async function sendAndPersist(userId: string, text: string): Promise<void> {
   const user = await db.query.users.findFirst({
     where: eq(users.id, userId),
-    columns: { telegramId: true },
+    columns: {
+      telegramId: true,
+    },
   });
-  if (!user?.telegramId) {
-    log.warn(`user=${userId} has no telegram_id; skipping send`);
+  const target = resolveDeliveryTarget(user);
+  if (!target) {
+    log.warn(`user=${userId} has no chat surface; skipping send`);
     return;
   }
 
   try {
-    await sendHtml(user.telegramId, text);
+    await deliver(target, { kind: 'text', text });
   } catch (err) {
-    log.error(`telegram send failed for user=${userId}`, err);
+    log.error(`${target.surface} send failed for user=${userId}`, err);
     return; // don't persist if the send failed — user got nothing
   }
   try {
     await db.insert(messages).values({ userId, role: 'assistant', content: text });
   } catch (persistErr) {
     log.error(
-      `telegram sent to user=${userId} but DB persist failed — history will have a gap`,
+      `chat reply sent to user=${userId} but DB persist failed — history will have a gap`,
       persistErr,
     );
   }
 }
 
+function resolveDeliveryTarget(user: {
+  telegramId: string | null;
+} | null | undefined): { surface: SurfaceName; externalId: string } | null {
+  if (!user) return null;
+  if (user.telegramId) return { surface: 'telegram', externalId: user.telegramId };
+  return null;
+}

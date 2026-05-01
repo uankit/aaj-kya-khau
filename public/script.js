@@ -87,7 +87,7 @@
 
   // 2. Scroll reveal — light touch.
   const revealTargets = document.querySelectorAll(
-    '.wedge, .flows, .how, .vs, .trust, .faq, .final-cta, .flow-card, .step, .vs-col, .trust-list li, .faq-item, .wedge-list li',
+    '.difference, .flows, .how, .science, .final-cta, .comparison-row, .flow-card, .step, .citation-card, .final-card',
   );
   revealTargets.forEach((el) => el.classList.add('reveal'));
 
@@ -131,27 +131,54 @@
     { passive: true },
   );
 
-  // 4. Chat-bubble replay when the hero chat enters the viewport.
-  const chatFrame = document.querySelector('.chat-frame');
-  if (chatFrame && 'IntersectionObserver' in window) {
-    const chatObserver = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const bubbles = entry.target.querySelectorAll('.chat-bubble');
-            bubbles.forEach((b) => {
-              b.style.animation = 'none';
-              // trigger reflow
-              // eslint-disable-next-line no-unused-expressions
-              b.offsetWidth;
-              b.style.animation = '';
-            });
-            chatObserver.unobserve(entry.target);
-          }
-        });
-      },
-      { threshold: 0.4 },
-    );
-    chatObserver.observe(chatFrame);
+  // 4. Hero chat carousel — alternate meal suggestion and Zepto order flows.
+  const chatPanels = Array.from(document.querySelectorAll('[data-chat-panel]'));
+  function replayBubbles(panel) {
+    const bubbles = panel.querySelectorAll('.chat-bubble');
+    bubbles.forEach((b) => {
+      b.style.animation = 'none';
+      // trigger reflow
+      // eslint-disable-next-line no-unused-expressions
+      b.offsetWidth;
+      b.style.animation = '';
+    });
+  }
+
+  if (chatPanels.length > 0) {
+    let activePanel = Math.max(0, chatPanels.findIndex((panel) => panel.classList.contains('is-active')));
+    let chatTimer = null;
+
+    function showPanel(index) {
+      chatPanels[activePanel].classList.remove('is-active');
+      activePanel = index;
+      chatPanels[activePanel].classList.add('is-active');
+      replayBubbles(chatPanels[activePanel]);
+    }
+
+    function startChatCarousel() {
+      replayBubbles(chatPanels[activePanel]);
+      if (chatPanels.length < 2 || chatTimer) return;
+      chatTimer = window.setInterval(() => {
+        showPanel((activePanel + 1) % chatPanels.length);
+      }, 6200);
+    }
+
+    const chatStack = document.querySelector('.chat-stack');
+    if (chatStack && 'IntersectionObserver' in window) {
+      const chatObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              startChatCarousel();
+              chatObserver.unobserve(entry.target);
+            }
+          });
+        },
+        { threshold: 0.35 },
+      );
+      chatObserver.observe(chatStack);
+    } else {
+      startChatCarousel();
+    }
   }
 })();

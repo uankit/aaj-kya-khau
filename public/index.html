@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
   <!-- Primary SEO -->
-  <title>Aaj Kya Khaun — AI food agent that orders from Zepto in chat</title>
-  <meta name="description" content="An AI agent that knows what's in your kitchen, suggests what to cook, and orders only the ingredients you're missing on Zepto. Free, in chat. India-first." />
+  <title>Aaj Kya Khaun — Zepto AI agent that orders groceries in chat</title>
+  <meta name="description" content="A kitchen-aware AI agent that knows what you have, suggests kya banaye, and directly orders only the ingredients you're missing on Zepto. India-first." />
   <meta name="keywords" content="aaj kya khau, what to cook tonight, kya banaye, AI grocery assistant India, Zepto AI agent, instant grocery automation, meal planning India, decision fatigue food" />
   <meta name="author" content="Aaj Kya Khaun" />
   <link rel="canonical" href="https://aajkyakhaun.com/" />
@@ -16,12 +16,12 @@
   <meta property="og:locale" content="en_IN" />
   <meta property="og:site_name" content="Aaj Kya Khaun" />
   <meta property="og:url" content="https://aajkyakhaun.com/" />
-  <meta property="og:title" content="Aaj Kya Khaun — AI food agent that orders from Zepto in chat" />
-  <meta property="og:description" content="Tell your kitchen what you want. The agent suggests meals from what you have, orders only what's missing on Zepto." />
+  <meta property="og:title" content="Aaj Kya Khaun — Zepto AI agent that orders groceries in chat" />
+  <meta property="og:description" content="Tell your kitchen what you want. The agent suggests meals from what you have, then directly orders only what's missing on Zepto." />
   <meta property="og:image" content="https://aajkyakhaun.com/static/icon.svg" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Aaj Kya Khaun — Stop scrolling Zepto at 9pm" />
-  <meta name="twitter:description" content="AI food agent that knows your pantry, suggests meals, orders only what's missing." />
+  <meta name="twitter:title" content="Aaj Kya Khaun — Zepto AI agent that orders in chat" />
+  <meta name="twitter:description" content="AI food agent that knows your pantry, suggests meals, and directly orders only what's missing on Zepto." />
   <meta name="twitter:image" content="https://aajkyakhaun.com/static/icon.svg" />
 
   <meta name="theme-color" content="#001858" />
@@ -42,7 +42,7 @@
     "name": "Aaj Kya Khaun",
     "url": "https://aajkyakhaun.com",
     "applicationCategory": "LifestyleApplication",
-    "operatingSystem": "Web, Telegram, Android, iOS (PWA)",
+    "operatingSystem": "Web, Android, iOS (PWA)",
     "description": "AI food agent that maintains your kitchen inventory, suggests meals from what you have, and orders only the ingredients you're missing on Zepto.",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" },
     "inLanguage": ["en-IN", "hi-IN"],
@@ -50,31 +50,6 @@
   }
   </script>
 
-  <!-- Structured data: FAQPage (mirrors the FAQ section below) -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      { "@type": "Question", "name": "What does Aaj Kya Khaun actually do?",
-        "acceptedAnswer": { "@type": "Answer", "text": "It's an AI agent that knows what's in your kitchen — by reading your last 30 Zepto orders — and answers two questions: 'What should I eat from what I have?' and 'I want X, what's missing?'. When something is missing, it places a Zepto order in chat. COD by default." }},
-      { "@type": "Question", "name": "How is this different from Zepto's own app?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Zepto delivers; we decide. Their app shows a catalog and waits for you to scroll. We start from your kitchen — what you already have, what you ate recently — and only surface what you're actually missing. One sentence in, an order out." }},
-      { "@type": "Question", "name": "Do I need a Zepto account?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Yes. We connect via Zepto's official OAuth — you sign in once with your Zepto account, the token stays encrypted on our server, and we use Zepto's API to search products and place orders for you. We never see your Zepto password." }},
-      { "@type": "Question", "name": "What does it cost?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Free during beta. Zepto's prices and delivery fees are unchanged — we don't mark anything up." }},
-      { "@type": "Question", "name": "Is my data safe?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Tokens are encrypted at rest. We don't sell data, don't run ads, don't share your inventory with anyone. Cancel any time and we delete everything." }},
-      { "@type": "Question", "name": "Do I have to use Telegram?",
-        "acceptedAnswer": { "@type": "Answer", "text": "No. The chat works directly on the web (with optional push notifications) or via Telegram — your choice during onboarding." }},
-      { "@type": "Question", "name": "Where do you deliver?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Anywhere Zepto delivers. We use the addresses already saved on your Zepto account." }},
-      { "@type": "Question", "name": "Toh basically AI cook hai?",
-        "acceptedAnswer": { "@type": "Answer", "text": "Almost — but not quite. Cook nahi, kitchen-aware sous-chef. It doesn't physically make the food; it tells you what's worth cooking with what you already have, and orders the missing one ingredient on Zepto if needed. Decision fatigue khatam, baaki khaana aapko banana hai." }}
-    ]
-  }
-  </script>
 </head>
 
 <body>
@@ -94,11 +69,10 @@
         <span class="logo-text">Aaj Kya Khaun</span>
       </a>
       <div class="nav-links">
-        <a href="#how-it-works">How it works</a>
         <a href="#flows">What it does</a>
-        <a href="#faq">FAQ</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#science">Nutrition science</a>
       </div>
-      <a href="#signup" class="nav-cta">Get started</a>
     </div>
   </nav>
 
@@ -106,17 +80,20 @@
   <header class="hero" id="signup">
     <div class="hero-inner">
       <div class="hero-content">
-        <span class="pill">🍳 Aaj Kya Khaun · aapka kitchen agent</span>
+        <span class="pill">🍳 Aaj Kya Khaun · Zepto ordering agent</span>
 
         <h1 class="hero-title">
-          <span class="title-line">
-            <span class="highlight">Stop scrolling Zepto</span>
+          <span class="title-line line-1" data-text="Aaj Kya Khaun?">Aaj Kya Khaun?</span>
+          <span class="title-line line-2">
+            <span class="highlight">Stop deciding,</span>
           </span>
-          <span class="title-line">at 9pm.</span>
+          <span class="title-line line-2">
+            <span class="highlight">start cooking.</span>
+          </span>
         </h1>
 
         <p class="hero-sub">
-          Tell your kitchen what you want. The agent suggests <em>kya banaye</em> from what you <em>actually</em> have — and orders only the ingredients you're missing on Zepto. Free, in chat.
+          Tell your kitchen what you want. The agent suggests <em>kya banaye</em> from what you <em>actually</em> have — and directly orders only the ingredients you're missing on Zepto. Free, in chat.
         </p>
 
         <!-- Email signup, on the hero. The CTA target. -->
@@ -140,61 +117,73 @@
         </form>
         <p class="signup-error" id="hero-error" role="alert" hidden></p>
         <p class="signup-sent" id="hero-sent" hidden>
-          ✨ Check your inbox at <strong id="hero-sent-email"></strong>. Magic link expires in 15&nbsp;min.
+          ✨ Check your inbox at <strong id="hero-sent-email"></strong>.
         </p>
 
-        <p class="hero-microcopy">
-          Free · ~30 seconds to set up · COD orders, no card stored
-        </p>
       </div>
 
-      <!-- Hero visual: faux chat preview, two scenarios stacked -->
+      <!-- Hero visual: faux chat preview, rotating through both core flows -->
       <aside class="hero-visual" aria-hidden="true">
-        <div class="chat-frame">
-          <div class="chat-header">
-            <div class="chat-avatar">🍽️</div>
-            <div class="chat-meta">
-              <div class="chat-name">Aaj Kya Khaun</div>
-              <div class="chat-status">online</div>
+        <div class="chat-stack">
+          <div class="chat-frame chat-panel is-active" data-chat-panel="cook">
+            <div class="chat-header">
+              <div class="chat-avatar">🍽️</div>
+              <div class="chat-meta">
+                <div class="chat-name">Aaj Kya Khaun</div>
+                <div class="chat-status">online</div>
+              </div>
+            </div>
+            <div class="chat-body">
+              <div class="chat-bubble user">i'm hungry 🍌</div>
+              <div class="chat-bubble bot">
+                Bhook lagi? You've got <b>eggs, bread, cheese, tomato</b> — straight-up cheese omelette + toast?
+              </div>
+              <div class="chat-bubble user">healthy version?</div>
+              <div class="chat-bubble bot">
+                Veggie omelette (2 eggs, tomato, onion) + 1 toast ≈ 280 cal · 18g protein · 12g carbs 💪
+              </div>
+              <div class="chat-bubble user">done</div>
+              <div class="chat-bubble bot">
+                Logged. You're at 45% of today's target 🎯
+              </div>
             </div>
           </div>
-          <div class="chat-body">
-            <div class="chat-bubble user">i'm hungry, what can i make?</div>
-            <div class="chat-bubble bot">
-              You've got <b>rice, dal, onions, tomatoes</b>. Khichdi in 20 min?
+
+          <div class="chat-frame chat-panel" data-chat-panel="order">
+            <div class="chat-header">
+              <div class="chat-avatar">🍽️</div>
+              <div class="chat-meta">
+                <div class="chat-name">Aaj Kya Khaun</div>
+                <div class="chat-status">online</div>
+              </div>
             </div>
-            <div class="chat-bubble user">tomorrow i want pasta</div>
-            <div class="chat-bubble bot">
-              You have garlic, tomato, basil. Missing: <b>pasta</b>.<br/>
-              Order from Zepto for <b>₹62</b>?
-            </div>
-            <div class="chat-bubble user">yes</div>
-            <div class="chat-bubble bot">
-              ✅ Pasta on the way. ETA 9 min · COD.
+            <div class="chat-body">
+              <div class="chat-bubble user">i'm hungry, what can i make?</div>
+              <div class="chat-bubble bot">
+                You've got <b>rice, dal, onions, tomatoes</b>. Khichdi in 20 min?
+              </div>
+              <div class="chat-bubble user">tomorrow i want pasta</div>
+              <div class="chat-bubble bot">
+                You have garlic, tomato, basil. Missing: <b>pasta</b>.<br/>
+                Order from Zepto for <b>₹62</b>?
+              </div>
+              <div class="chat-bubble user">yes</div>
+              <div class="chat-bubble bot">
+                ✅ Pasta on the way. ETA 9 min · COD.
+              </div>
             </div>
           </div>
+
+          <span class="chip chip-1">🥚 eggs</span>
+          <span class="chip chip-2">🥛 milk</span>
+          <span class="chip chip-3">🧀 paneer</span>
+          <span class="chip chip-4">🌶️ chilli</span>
+          <span class="chip chip-5">🍞 bread</span>
+          <span class="chip chip-6">🍅 tomato</span>
         </div>
       </aside>
     </div>
   </header>
-
-  <!-- ============ THE WEDGE ============ -->
-  <section class="wedge">
-    <div class="container narrow">
-      <h2 class="section-h2">Har shaam ka silent tax.</h2>
-      <p class="section-lede">
-        Every meal in India costs you the same three minutes you didn't budget for:
-      </p>
-      <ul class="wedge-list">
-        <li><span class="wedge-num">90s</span> staring into the fridge</li>
-        <li><span class="wedge-num">5m</span> scrolling Zepto for one missing thing</li>
-        <li><span class="wedge-num">2m</span> remembering what you forgot last time</li>
-      </ul>
-      <p class="section-lede">
-        We collapse all three into a single sentence.
-      </p>
-    </div>
-  </section>
 
   <!-- ============ TWO FLOWS ============ -->
   <section class="flows" id="flows">
@@ -230,6 +219,40 @@
     </div>
   </section>
 
+  <!-- ============ WHY THIS IS DIFFERENT ============ -->
+  <section class="difference">
+    <div class="container">
+      <div class="section-kicker">Why this is different</div>
+      <h2 class="section-h2 difference-title">
+        Most food apps give you <span>recipes.</span><br />
+        This one knows your kitchen.
+      </h2>
+
+      <div class="comparison-table" role="table" aria-label="How Aaj Kya Khaun compares with generic AI and recipe apps">
+        <div class="comparison-row comparison-head" role="row">
+          <div role="columnheader">Option</div>
+          <div role="columnheader">What it gives you</div>
+          <div role="columnheader">What happens next</div>
+        </div>
+        <div class="comparison-row" role="row">
+          <div class="comparison-option" role="cell">🤖 Generic AI bots</div>
+          <div role="cell">"Here are 10 paneer recipes."</div>
+          <div role="cell">Still needs ingredients you do not have.</div>
+        </div>
+        <div class="comparison-row" role="row">
+          <div class="comparison-option" role="cell">📱 Recipe apps</div>
+          <div role="cell">50 recipes. Search bar. Grocery list.</div>
+          <div role="cell">You still check the fridge and order manually.</div>
+        </div>
+        <div class="comparison-row comparison-row-us" role="row">
+          <div class="comparison-option" role="cell">🍽️ Aaj Kya Khaun</div>
+          <div role="cell">"I'm hungry" → omelette from eggs + bread.</div>
+          <div role="cell">Missing pasta? Ordered on Zepto. Dinner handled.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ HOW IT WORKS ============ -->
   <section class="how" id="how-it-works">
     <div class="container">
@@ -249,124 +272,84 @@
         <li class="step">
           <span class="step-num">3</span>
           <h3 class="step-h">Open chat.</h3>
-          <p class="step-p">Right here on the web (with optional push notifications) or on Telegram. Your call.</p>
+          <p class="step-p">Use the magic link from your email, then start chatting on the web.</p>
         </li>
       </ol>
     </div>
   </section>
 
-  <!-- ============ NOT JUST ZEPTO ============ -->
-  <section class="vs">
-    <div class="container narrow">
-      <h2 class="section-h2">Zepto delivers. We decide.</h2>
-      <p class="section-lede">
-        Zepto solved logistics. They didn't solve <em>decision fatigue</em>.
-      </p>
-      <div class="vs-grid">
-        <div class="vs-col">
-          <div class="vs-h">Zepto app</div>
-          <ul>
-            <li>Catalog + search bar</li>
-            <li>You scroll, you decide, you remember what you have</li>
-            <li>10-minute delivery</li>
-          </ul>
+  <!-- ============ SCIENCE ============ -->
+  <section class="science" id="science">
+    <div class="container">
+      <div class="science-card">
+        <div class="science-header">
+          <span class="science-label">🔬 Built on peer-reviewed research</span>
+          <h2>Science over guesswork.</h2>
+          <p>
+            Nutrition math is not made up. Every calorie and macro target comes
+            from definitive Indian nutrition literature and validated global standards.
+          </p>
         </div>
-        <div class="vs-col vs-col-us">
-          <div class="vs-h">Aaj Kya Khaun</div>
-          <ul>
-            <li>One sentence in, one decision out</li>
-            <li>Knows your pantry, your last 30 orders, your meal times</li>
-            <li>Same 10-minute delivery — Zepto on the back end</li>
-          </ul>
+
+        <div class="science-grid">
+          <article class="citation-card">
+            <span class="citation-num">01</span>
+            <h4>Mifflin-St Jeor Equation</h4>
+            <p class="citation-meta">Am J Clin Nutr, 1990</p>
+            <p class="citation-body">Used to calculate your baseline calorie burn before goals are applied.</p>
+          </article>
+
+          <article class="citation-card">
+            <span class="citation-num">02</span>
+            <h4>ICMR-NIN RDA 2020</h4>
+            <p class="citation-meta">National Institute of Nutrition, Hyderabad</p>
+            <p class="citation-body">India-specific recommendations for protein, carbs, fat, and fiber.</p>
+          </article>
+
+          <article class="citation-card">
+            <span class="citation-num">03</span>
+            <h4>Indian Food Composition Tables 2017</h4>
+            <p class="citation-meta">Longvah T et al., NIN-ICMR</p>
+            <p class="citation-body">Lab-analyzed nutrition data for 500+ Indian foods and ingredients.</p>
+          </article>
+
+          <article class="citation-card">
+            <span class="citation-num">04</span>
+            <h4>WHO Technical Report 916</h4>
+            <p class="citation-meta">World Health Organization, 2003</p>
+            <p class="citation-body">Sustainable weight management targets for deficit and surplus goals.</p>
+          </article>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ============ TRUST ============ -->
-  <section class="trust">
-    <div class="container narrow">
-      <h2 class="section-h2">What we don't do.</h2>
-      <ul class="trust-list">
-        <li><strong>Sell your data.</strong> No ads, no analytics broker, no third-party trackers.</li>
-        <li><strong>Touch your card.</strong> COD by default. Online payment goes through Zepto's checkout — we never see card numbers.</li>
-        <li><strong>Spam you.</strong> Notifications only at the meal times you choose. Mute or change them anytime.</li>
-        <li><strong>Lock you in.</strong> One click in settings deletes your account, your tokens, and your message history.</li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- ============ FAQ (SEO) ============ -->
-  <section class="faq" id="faq">
-    <div class="container narrow">
-      <h2 class="section-h2">Questions, honestly answered.</h2>
-
-      <details class="faq-item">
-        <summary>What does Aaj Kya Khaun actually do?</summary>
-        <p>It's an AI agent that knows what's in your kitchen — by reading your last 30 Zepto orders — and answers two questions: <em>"What should I eat from what I have?"</em> and <em>"I want X, what's missing?"</em>. When something is missing, it places a Zepto order in chat. COD by default.</p>
-      </details>
-
-      <details class="faq-item">
-        <summary>How is this different from Zepto's own app?</summary>
-        <p>Zepto delivers; we decide. Their app shows a catalog and waits for you to scroll. We start from your kitchen — what you already have, what you ate recently — and only surface what you're actually missing. One sentence in, an order out.</p>
-      </details>
-
-      <details class="faq-item">
-        <summary>Do I need a Zepto account?</summary>
-        <p>Yes. We connect via Zepto's official OAuth — you sign in once with your Zepto account, the token stays encrypted on our server, and we use Zepto's API to search products and place orders for you. We never see your Zepto password.</p>
-      </details>
-
-      <details class="faq-item">
-        <summary>What does it cost?</summary>
-        <p>Free during beta. Zepto's prices and delivery fees are unchanged — we don't mark anything up.</p>
-      </details>
-
-      <details class="faq-item">
-        <summary>Is my data safe?</summary>
-        <p>Tokens are encrypted at rest. We don't sell data, don't run ads, don't share your inventory with anyone. Cancel any time and we delete everything.</p>
-      </details>
-
-      <details class="faq-item">
-        <summary>Do I have to use Telegram?</summary>
-        <p>No. The chat works directly on the web (with optional push notifications via PWA) or via Telegram — your choice during onboarding. You can switch anytime.</p>
-      </details>
-
-      <details class="faq-item">
-        <summary>Where do you deliver?</summary>
-        <p>Anywhere Zepto delivers. We use the addresses already saved on your Zepto account; you can pick which one when ordering.</p>
-      </details>
-
-      <details class="faq-item">
-        <summary>Toh basically AI cook hai?</summary>
-        <p>Almost — but not quite. Cook nahi, kitchen-aware sous-chef. It doesn't physically make the food; it tells you what's worth cooking with what you already have, and orders the missing one ingredient on Zepto if needed. Decision fatigue khatam, baaki khaana aapko banana hai.</p>
-      </details>
-    </div>
-  </section>
-
   <!-- ============ FINAL CTA ============ -->
   <section class="final-cta">
-    <div class="container narrow">
-      <h2 class="section-h2">Try it tonight.</h2>
-      <p class="section-lede">Two minutes from this email field to your first meal idea.</p>
-      <form id="footer-signup" class="signup-form" aria-label="Sign up with email">
-        <input
-          type="email"
-          name="email"
-          id="footer-email"
-          class="signup-input"
-          placeholder="your@email.com"
-          autocomplete="email"
-          required
-          aria-label="Email address"
-        />
-        <button type="submit" class="btn btn-primary btn-signup">
-          <span class="btn-label">Get started</span>
-        </button>
-      </form>
-      <p class="signup-error" id="footer-error" role="alert" hidden></p>
-      <p class="signup-sent" id="footer-sent" hidden>
-        ✨ Magic link sent. Check your inbox at <strong id="footer-sent-email"></strong>.
-      </p>
+    <div class="container">
+      <div class="cta-card final-card">
+        <h2>Stop asking <em>"Aaj kya khaun?"</em><br />every single day.</h2>
+        <p>Your kitchen, your schedule, your goals. One email to get started.</p>
+        <form id="footer-signup" class="signup-form" aria-label="Sign up with email">
+          <input
+            type="email"
+            name="email"
+            id="footer-email"
+            class="signup-input"
+            placeholder="your@email.com"
+            autocomplete="email"
+            required
+            aria-label="Email address"
+          />
+          <button type="submit" class="btn btn-primary btn-signup">
+            <span class="btn-label">Get started</span>
+          </button>
+        </form>
+        <p class="signup-error" id="footer-error" role="alert" hidden></p>
+        <p class="signup-sent" id="footer-sent" hidden>
+          ✨ Magic link sent. Check your inbox at <strong id="footer-sent-email"></strong>.
+        </p>
+      </div>
     </div>
   </section>
 
@@ -382,18 +365,9 @@
           <p class="footer-tagline">Made in India. For Indian kitchens.</p>
         </div>
         <div class="footer-col">
-          <div class="footer-h">Product</div>
-          <a href="#flows">What it does</a>
-          <a href="#how-it-works">How it works</a>
-          <a href="#faq">FAQ</a>
-        </div>
-        <div class="footer-col">
           <div class="footer-h">Reach us</div>
-          <a href="mailto:hello@aajkyakhaun.com">hello@aajkyakhaun.com</a>
+          <a href="mailto:connect@aajkyakhaun.com">connect@aajkyakhaun.com</a>
         </div>
-      </div>
-      <div class="footer-bottom">
-        © <span id="year"></span> Aaj Kya Khaun · Independent · Built with Zepto
       </div>
     </div>
   </footer>

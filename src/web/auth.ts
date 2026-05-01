@@ -37,10 +37,10 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         to: email,
         subject: 'Sign in to Aaj Kya Khaun',
         html: `<p>Hi,</p>
-<p>Click the link below to sign in. It expires in 15 minutes and works once.</p>
+<p>Click the link below to sign in.</p>
 <p><a href="${link}">${link}</a></p>
 <p>— Aaj Kya Khaun</p>`,
-        text: `Sign in: ${link}\n\nExpires in 15 minutes.`,
+        text: `Sign in: ${link}`,
       });
     } catch (err) {
       log.error('magic-link email send failed', err);

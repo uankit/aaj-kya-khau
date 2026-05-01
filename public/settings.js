@@ -171,7 +171,6 @@
       tStatus.textContent = 'Not linked';
       tStatus.classList.add('is-disconnected');
     }
-
   }
 
   document.getElementById('btn-zepto').addEventListener('click', async () => {

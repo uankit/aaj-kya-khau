@@ -13,6 +13,7 @@ import { Bot, type Context } from 'grammy';
 import { env } from '../../config/env.js';
 import { createLogger } from '../../utils/logger.js';
 import { withTimeout, retryWithBackoff } from '../../utils/timeout.js';
+import { htmlToPlainText } from '../../utils/html.js';
 
 const log = createLogger('telegram');
 
@@ -128,16 +129,7 @@ function replyMarkup(options?: SendMessageOptions) {
 }
 
 function stripHtml(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+  return htmlToPlainText(html);
 }
 
 export async function sendText(

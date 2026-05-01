@@ -127,7 +127,7 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true, mealsCount: meals.length });
   });
 
-  // POST /api/me/bind/start — mint a one-time token + return Telegram deep link.
+  // POST /api/me/bind/start — mint a one-time token + return chat deep link.
   app.post('/api/me/bind/start', { preHandler: requireAuth }, async (request, reply) => {
     const u = request.user!;
     const token = bindTokenString();
@@ -140,8 +140,8 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
       ? `https://t.me/${botUsername}?start=${token}`
       : `${base}/api/bind/telegram-help?token=${token}`;
 
-    log.info(`bind token issued for user=${u.id}`);
-    return reply.send({ token, deepLink, expiresAt });
+    log.info(`telegram bind token issued for user=${u.id}`);
+    return reply.send({ token, deepLink, expiresAt, surface: 'telegram' });
   });
 
   // DELETE /api/me/zepto — disconnect Zepto. Removes the stored token,
@@ -190,4 +190,3 @@ export async function onboardingRoutes(app: FastifyInstance): Promise<void> {
     return reply.send({ ok: true });
   });
 }
-

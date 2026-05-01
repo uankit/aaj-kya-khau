@@ -47,48 +47,51 @@ export async function issueMagicLink(email: string): Promise<string> {
  * already-used tokens.
  */
 export async function consumeMagicLink(token: string): Promise<User> {
-  const [row] = await db
-    .select()
-    .from(magicLinkTokens)
-    .where(
-      and(
-        eq(magicLinkTokens.token, token),
-        isNull(magicLinkTokens.usedAt),
-        gt(magicLinkTokens.expiresAt, new Date()),
-      ),
-    )
-    .limit(1);
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(magicLinkTokens)
+      .where(
+        and(
+          eq(magicLinkTokens.token, token),
+          isNull(magicLinkTokens.usedAt),
+          gt(magicLinkTokens.expiresAt, new Date()),
+        ),
+      )
+      .limit(1);
 
-  if (!row) throw new Error('invalid or expired magic link');
+    if (!row) throw new Error('invalid or expired magic link');
 
-  // Mark used FIRST to make consumption atomic-ish even under concurrent clicks.
-  const [used] = await db
-    .update(magicLinkTokens)
-    .set({ usedAt: new Date() })
-    .where(and(eq(magicLinkTokens.token, token), isNull(magicLinkTokens.usedAt)))
-    .returning();
-  if (!used) throw new Error('magic link already used');
-
-  // Find-or-create user.
-  let [user] = await db.select().from(users).where(eq(users.email, row.email)).limit(1);
-  if (!user) {
-    const [created] = await db
-      .insert(users)
-      .values({
-        email: row.email,
-        emailVerifiedAt: new Date(),
-      })
+    // Mark used inside the transaction. If user/session setup fails, this
+    // rolls back too, so a schema hiccup does not burn the link.
+    const [used] = await tx
+      .update(magicLinkTokens)
+      .set({ usedAt: new Date() })
+      .where(and(eq(magicLinkTokens.token, token), isNull(magicLinkTokens.usedAt)))
       .returning();
-    user = created;
-  } else if (!user.emailVerifiedAt) {
-    const [updated] = await db
-      .update(users)
-      .set({ emailVerifiedAt: new Date() })
-      .where(eq(users.id, user.id))
-      .returning();
-    user = updated ?? user;
-  }
-  return user!;
+    if (!used) throw new Error('magic link already used');
+
+    // Find-or-create user.
+    let [user] = await tx.select().from(users).where(eq(users.email, row.email)).limit(1);
+    if (!user) {
+      const [created] = await tx
+        .insert(users)
+        .values({
+          email: row.email,
+          emailVerifiedAt: new Date(),
+        })
+        .returning();
+      user = created;
+    } else if (!user.emailVerifiedAt) {
+      const [updated] = await tx
+        .update(users)
+        .set({ emailVerifiedAt: new Date() })
+        .where(eq(users.id, user.id))
+        .returning();
+      user = updated ?? user;
+    }
+    return user!;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import { eq } from 'drizzle-orm';
 import { db } from '../../config/database.js';
 import { invoices, type Invoice } from '../../db/schema.js';
-import { downloadMedia } from '../../surfaces/telegram/index.js';
+import { downloadMedia as downloadTelegramMedia } from '../../surfaces/telegram/index.js';
 import { addItemsBulk, type AddItemInput } from '../../services/inventory.js';
 import { model } from '../../llm/client.js';
 import { createLogger } from '../../utils/logger.js';
@@ -85,7 +85,7 @@ export interface ParseInvoiceResult {
  */
 export async function parseAndSaveInvoice(args: {
   userId: string;
-  /** Telegram file_id for the document attachment */
+  /** Telegram media id for the document attachment. */
   fileId: string;
 }): Promise<ParseInvoiceResult> {
   const { userId, fileId } = args;
@@ -100,8 +100,8 @@ export async function parseAndSaveInvoice(args: {
   const invoiceId = invoice!.id;
 
   try {
-    // 2. Download PDF bytes from Telegram's file CDN
-    const buffer = await downloadMedia(fileId);
+    // 2. Download PDF bytes from the originating chat surface's file CDN.
+    const buffer = await downloadTelegramMedia(fileId);
     log.debug(`Downloaded PDF (${buffer.length} bytes) for user ${userId}`);
 
     // 3. Extract text

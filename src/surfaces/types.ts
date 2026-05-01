@@ -1,11 +1,11 @@
 /**
- * SurfaceAdapter — the abstraction every chat transport (Telegram, WhatsApp)
+ * SurfaceAdapter — the abstraction every chat transport
  * implements for OUTBOUND messages. Domain code (scheduler, agent, workflows)
  * emits provider-agnostic OutboundContent and the adapter lowers it into the
- * surface's native shape (Telegram inline keyboards, WhatsApp templates, etc.).
+ * surface's native shape (Telegram inline keyboards, etc.).
  *
  * Inbound parsing stays surface-specific for now — webhook formats diverge
- * too much to be worth abstracting before WhatsApp is wired.
+ * too much to be worth abstracting before another surface is wired.
  */
 
 /** Live chat surfaces. Add new entries once their adapter ships. */

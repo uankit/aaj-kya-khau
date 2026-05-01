@@ -239,13 +239,24 @@
 
   document.getElementById('zepto-continue').addEventListener('click', () => show('surface'));
 
-  // ── Surface (Telegram only) ────────────────────────────
+  // ── Chat surface ───────────────────────────────────────
   const bindLinkEl = document.getElementById('bind-link');
   let surfaceLoaded = false;
 
   async function loadSurfaceStep() {
     if (surfaceLoaded) return;
     surfaceLoaded = true;
+    const title = document.getElementById('surface-title');
+    const lede = document.getElementById('surface-lede');
+    const hint = document.getElementById('surface-hint');
+    if (title) title.textContent = 'Last step — connect Telegram.';
+    if (lede) {
+      lede.textContent = 'Tap below. Telegram opens with a one-tap verify message — hit send and you’re in.';
+    }
+    if (hint) {
+      hint.textContent = 'Don’t have Telegram? Grab it from the App Store / Play Store, sign in, then come back and tap above.';
+    }
+
     const res = await api('/api/me/bind/start', { method: 'POST' });
     if (!res.ok) {
       notify('Could not generate the Telegram link. Refresh and try again.', 'error');
@@ -254,6 +265,7 @@
     }
     const { deepLink } = await res.json();
     bindLinkEl.href = deepLink;
+    bindLinkEl.textContent = 'Open Telegram ↗';
 
     // Pre-populate the done card so it's ready before the user lands on it.
     const firstName = (me?.name ?? '').trim().split(/\s+/)[0];
@@ -271,7 +283,7 @@
     if (surfaceEl) surfaceEl.textContent = 'Telegram';
   }
 
-  // Tapping the Telegram link marks onboarding complete optimistically —
+  // Tapping the chat link marks onboarding complete optimistically —
   // the server-side verify happens when the user sends /start <token>.
   bindLinkEl.addEventListener('click', async () => {
     await api('/api/me/onboarding/complete', { method: 'POST' });

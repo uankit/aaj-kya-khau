@@ -38,7 +38,7 @@ The LLM handles natural language understanding and personality. The science hand
 
 ```bash
 npm install
-cp .env.example .env      # fill in Telegram bot token + LLM creds + DATABASE_URL
+cp .env.example .env      # fill in Telegram + LLM creds + DATABASE_URL
 createdb aaj_kya_khaun
 npm run db:migrate        # apply schema
 npm run db:seed           # populate IFCT 2017 food database (~95 items)
@@ -54,6 +54,6 @@ Get a bot token from [@BotFather](https://t.me/BotFather) and generate a webhook
 3. Add a **Postgres** addon — `DATABASE_URL` is set automatically.
 4. Add env vars in Railway dashboard (see `.env.example`) — including `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET`.
 5. Railway auto-detects the `railway.json` config.
-6. Copy the public Railway URL → set as `PUBLIC_BASE_URL` → register the Telegram webhook at `https://<PUBLIC_BASE_URL>/webhook/telegram`.
+6. Copy the public Railway URL → set as `PUBLIC_BASE_URL` → register the webhook at `https://<PUBLIC_BASE_URL>/webhook/telegram`.
 
 Built with [Claude Code](https://claude.com/claude-code).
